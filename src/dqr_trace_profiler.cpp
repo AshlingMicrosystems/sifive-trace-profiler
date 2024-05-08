@@ -5830,15 +5830,24 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 					// error
 					// must have a JR/JALR or exception/exception return to get here, and the CR stack is empty
 
-					printf("Error: getCurrentCountType(core:%d) still has counts; have countType: %d\n", currentCore, counts->getCurrentCountType(currentCore));
-					char d[64];
+					//printf("Error: getCurrentCountType(core:%d) still has counts; have countType: %d\n", currentCore, counts->getCurrentCountType(currentCore));
+					//char d[64];
 
-					instructionInfo.instructionToText(d, sizeof d, 2);
-					printf("%08llx:    %s\n", currentAddress[currentCore], d);
+					//instructionInfo.instructionToText(d, sizeof d, 2);
+					//printf("%08llx:    %s\n", currentAddress[currentCore], d);
 
-					state[currentCore] = TRACE_STATE_ERROR;
+					//state[currentCore] = TRACE_STATE_ERROR;
 
-					status = TraceDqrProfiler::DQERR_ERR;
+					//status = TraceDqrProfiler::DQERR_ERR;
+					//return status;
+
+					// Profiling will return error in case there is an issue with a trace record.
+					// This will lead to loss of data. In case the profiler is not able to continue,
+					// we can reset the state to TRACE_STATE_GETFIRSTSYNCMSG which will restart
+					// profiling at the next sync packet.
+					state[currentCore] = TRACE_STATE_GETFIRSTSYNCMSG;
+
+					status = TraceDqrProfiler::DQERR_OK;
 					return status;
 				}
 			}
