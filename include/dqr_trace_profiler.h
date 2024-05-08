@@ -17,7 +17,6 @@
 #include <algorithm> // std::equal
 #include <deque>
 #include <mutex>
-//#include <unistd.h>
 #ifdef WINDOWS
 #include<windows.h>
 #endif

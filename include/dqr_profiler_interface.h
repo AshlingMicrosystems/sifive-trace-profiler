@@ -15,7 +15,6 @@
 
 #include "SocketIntf.h"
 #include "dqr_profiler.h"
-//#pragma comment(lib, "Ws2_32.lib")
 
 #define TRANSFER_DATA_OVER_SOCKET 1
 #define WRITE_SEND_DATA_TO_FILE 0

@@ -13,8 +13,6 @@
 #include <cstdint>
 #include <cassert>
 
-//#define DO_TIMES	1
-
 #define DQR_PROFILER_MAXCORES	16
 
 #define PROFILER_DEFAULTOBJDUMPNAME	"riscv64-unknown-elf-objdump"
@@ -367,7 +365,6 @@ public:
 	void addressToText(char* dst, size_t len, int labelLevel);
 	std::string addressToString(int labelLevel);
 	std::string addressLabelToString();
-	//	void opcodeToText();
 	void instructionToText(char* dst, size_t len, int labelLevel);
 	std::string instructionToString(int labelLevel);
 
