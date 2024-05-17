@@ -793,7 +793,7 @@ public:
 	TraceDqrProfiler::DQErr getStatus() { return status; }
 	TraceDqrProfiler::DQErr NextInstruction(ProfilerInstruction** instInfo, ProfilerNexusMessage** msgInfo, ProfilerSource** srcInfo);
 	TraceDqrProfiler::DQErr NextInstruction(ProfilerInstruction* instInfo, ProfilerNexusMessage* msgInfo, ProfilerSource* srcInfo, int* flags);
-	TraceDqrProfiler::DQErr NextInstruction(ProfilerInstruction** instInfo, uint64_t &address_out);
+	TraceDqrProfiler::DQErr NextInstruction(ProfilerInstruction** instInfo, ProfilerNexusMessage **nm_out, uint64_t &address_out);
 
 	TraceDqrProfiler::DQErr getTraceFileOffset(int& size, int& offset);
 

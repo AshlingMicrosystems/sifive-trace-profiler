@@ -202,8 +202,11 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
     uint64_t prev_addr = 0;
     uint64_t idx = 0;
     uint64_t total_bytes_sent = 0;
+    uint64_t cum_inst_cnt = 0;
+    uint64_t block_no = 1;
     uint32_t mp_buffer_size_bytes = (PROFILE_THREAD_BUFFER_SIZE * sizeof(mp_buffer[0]));
     ProfilerInstruction *instInfo = nullptr;
+    ProfilerNexusMessage *nm = nullptr;
 
 #if WRITE_SEND_DATA_TO_FILE == 1
     std::string file_path = std::string(SEND_DATA_FILE_DUMP_PATH) + to_string(m_thread_idx) + ".txt";
@@ -211,8 +214,15 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
 #endif
 
     // Send the packet
-    while (trace->NextInstruction(&instInfo, address_out) == TraceDqrProfiler::DQERR_OK)
+    while (trace->NextInstruction(&instInfo, &nm, address_out) == TraceDqrProfiler::DQERR_OK)
     {
+        if (nm->offset >= m_ui_file_split_size_bytes * block_no)
+        {
+           // printf("\nFile %d Instructions %u", block_no, cum_inst_cnt);
+            m_fp_cum_ins_cnt_callback(cum_inst_cnt);
+            //m_cum_inst_cnt.push_back(cum_inst_cnt);
+            block_no++;
+        }
         if (idx >= PROFILE_THREAD_BUFFER_SIZE)
         {
 #if TRANSFER_DATA_OVER_SOCKET == 1
@@ -246,6 +256,7 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
             fprintf(fp, "%llx\n", address_out);
 #endif
             mp_buffer[idx++] = htonll(address_out);
+            cum_inst_cnt++;
             prev_addr = address_out;
         }
     }
@@ -275,6 +286,10 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
        // printf("\n-Waiting for Data ACK Thread ID %d", m_thread_idx);
         WaitforACK();
        // printf("\n-Received Data ACK Thread ID %d", m_thread_idx);
+
+        //printf("\nFile %d Instructions %u", block_no, cum_inst_cnt);
+        m_fp_cum_ins_cnt_callback(cum_inst_cnt);
+        //block_no++;
 #endif
     }
 
@@ -404,8 +419,25 @@ TySifiveTraceProfileError SifiveProfilerInterface::Configure(const TProfilerConf
 	itcPrintOpts = config.itc_print_options;
 	itcPrintChannel = config.itc_print_channel;
     m_port_no = config.portno;
+    m_ui_file_split_size_bytes = config.ui_file_split_size_bytes;
 
 	return SIFIVE_TRACE_PROFILER_OK;
+}
+
+/****************************************************************************
+     Function: SetCumUIFileInsCntCallback
+     Engineer: Arjun Suresh
+        Input: fp_callback - Callback to the function that will be called
+                             with the instruction count in a UI file
+       Output: None
+       return: None
+  Description: Function to set the file instruction count callback
+  Date         Initials    Description
+13-May-2022    AS          Initial
+****************************************************************************/
+void SifiveProfilerInterface::SetCumUIFileInsCntCallback(std::function<void(uint64_t cum_ins_cnt)> fp_callback)
+{
+    m_fp_cum_ins_cnt_callback = fp_callback;
 }
 
 /****************************************************************************
