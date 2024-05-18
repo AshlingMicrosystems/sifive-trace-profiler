@@ -12,8 +12,9 @@
 #include <cstring>
 #include <cstdint>
 #include <thread>
-#include <vector>
+#include <deque>
 #include <functional>
+#include <mutex>
 
 #include "SocketIntf.h"
 #include "dqr_profiler.h"
@@ -176,7 +177,9 @@ private:
     std::thread m_profiling_thread;
     uint64_t *mp_buffer = nullptr;
     uint32_t m_thread_idx = 0;
-    std::function<void(uint64_t)> m_fp_cum_ins_cnt_callback = nullptr;  // Funtion pointer to set callback
+    std::function<void(uint64_t, bool)> m_fp_cum_ins_cnt_callback = nullptr;  // Funtion pointer to set callback
+	std::mutex m_flush_data_offsets_mutex;                              // Mutex for synchronization
+	std::deque<uint64_t> m_flush_data_offsets;
 
     virtual TySifiveTraceProfileError ProfilingThread();
     virtual void CleanUp();
@@ -188,7 +191,8 @@ public:
     virtual TySifiveTraceProfileError PushTraceData(uint8_t *p_buff, const uint64_t &size);
     virtual void WaitForProfilerCompletion();
     virtual void SetEndOfData();
-    virtual void SetCumUIFileInsCntCallback(std::function<void(uint64_t cum_ins_cnt)> fp_callback);
+    virtual void SetCumUIFileInsCntCallback(std::function<void(uint64_t cum_ins_cnt, bool is_empty_file_offset)> fp_callback);
+	virtual void AddFlushDataOffset(const uint64_t offset);
 };
 
 // Function pointer typedef

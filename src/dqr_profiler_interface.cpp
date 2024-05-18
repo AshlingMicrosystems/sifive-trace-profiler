@@ -202,11 +202,11 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
     uint64_t prev_addr = 0;
     uint64_t idx = 0;
     uint64_t total_bytes_sent = 0;
-    uint64_t cum_inst_cnt = 0;
-    uint64_t block_no = 1;
+    uint64_t inst_cnt = 0;
     uint32_t mp_buffer_size_bytes = (PROFILE_THREAD_BUFFER_SIZE * sizeof(mp_buffer[0]));
     ProfilerInstruction *instInfo = nullptr;
     ProfilerNexusMessage *nm = nullptr;
+    uint64_t flush_offset = m_ui_file_split_size_bytes;
 
 #if WRITE_SEND_DATA_TO_FILE == 1
     std::string file_path = std::string(SEND_DATA_FILE_DUMP_PATH) + to_string(m_thread_idx) + ".txt";
@@ -216,12 +216,29 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
     // Send the packet
     while (trace->NextInstruction(&instInfo, &nm, address_out) == TraceDqrProfiler::DQERR_OK)
     {
-        if (nm->offset >= m_ui_file_split_size_bytes * block_no)
+        {
+            std::lock_guard<std::mutex> m_flush_data_offsets_guard(m_flush_data_offsets_mutex);
+            if (m_flush_data_offsets.size() > 0)
+            {
+                uint64_t offset = m_flush_data_offsets.front(); 
+                if (nm->offset >= offset)
+                {
+                    m_flush_data_offsets.pop_front();
+                    m_fp_cum_ins_cnt_callback(inst_cnt, false);
+                    if(offset != 0)
+                        m_fp_cum_ins_cnt_callback(inst_cnt, true);
+                    flush_offset = offset + m_ui_file_split_size_bytes;
+                    inst_cnt = 0;
+                }
+            }
+        }
+        if (nm->offset >= flush_offset)
         {
            // printf("\nFile %d Instructions %u", block_no, cum_inst_cnt);
-            m_fp_cum_ins_cnt_callback(cum_inst_cnt);
+            m_fp_cum_ins_cnt_callback(inst_cnt, false);
             //m_cum_inst_cnt.push_back(cum_inst_cnt);
-            block_no++;
+            flush_offset += m_ui_file_split_size_bytes;
+            inst_cnt = 0;
         }
         if (idx >= PROFILE_THREAD_BUFFER_SIZE)
         {
@@ -256,7 +273,7 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
             fprintf(fp, "%llx\n", address_out);
 #endif
             mp_buffer[idx++] = htonll(address_out);
-            cum_inst_cnt++;
+            inst_cnt++;
             prev_addr = address_out;
         }
     }
@@ -288,7 +305,9 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
        // printf("\n-Received Data ACK Thread ID %d", m_thread_idx);
 
         //printf("\nFile %d Instructions %u", block_no, cum_inst_cnt);
-        m_fp_cum_ins_cnt_callback(cum_inst_cnt);
+        m_fp_cum_ins_cnt_callback(inst_cnt, false);
+        m_fp_cum_ins_cnt_callback(inst_cnt, true);
+        inst_cnt = 0;
         //block_no++;
 #endif
     }
@@ -435,9 +454,18 @@ TySifiveTraceProfileError SifiveProfilerInterface::Configure(const TProfilerConf
   Date         Initials    Description
 13-May-2022    AS          Initial
 ****************************************************************************/
-void SifiveProfilerInterface::SetCumUIFileInsCntCallback(std::function<void(uint64_t cum_ins_cnt)> fp_callback)
+void SifiveProfilerInterface::SetCumUIFileInsCntCallback(std::function<void(uint64_t cum_ins_cnt, bool is_empty_file_offset)> fp_callback)
 {
     m_fp_cum_ins_cnt_callback = fp_callback;
+}
+
+void SifiveProfilerInterface::AddFlushDataOffset(const uint64_t offset)
+{
+    // Initialize the fetch status info
+    {
+        std::lock_guard<std::mutex> m_flush_data_offsets_guard(m_flush_data_offsets_mutex);
+        m_flush_data_offsets.push_back(offset);
+    }
 }
 
 /****************************************************************************
@@ -454,3 +482,4 @@ SifiveProfilerInterface* GetSifiveProfilerInterface()
 {
 	return new SifiveProfilerInterface;
 }
+
