@@ -191,7 +191,7 @@ public:
     virtual TySifiveTraceProfileError PushTraceData(uint8_t *p_buff, const uint64_t &size);
     virtual void WaitForProfilerCompletion();
     virtual void SetEndOfData();
-    virtual void SetCumUIFileInsCntCallback(std::function<void(uint64_t cum_ins_cnt, bool is_empty_file_offset)> fp_callback);
+    virtual void SetCumUIFileInsCntCallback(std::function<void(uint64_t cum_ins_cnt, bool is_empty_file_idx)> fp_callback);
 	virtual void AddFlushDataOffset(const uint64_t offset);
 };
 
