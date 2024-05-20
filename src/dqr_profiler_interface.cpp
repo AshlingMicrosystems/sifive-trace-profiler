@@ -483,3 +483,23 @@ SifiveProfilerInterface* GetSifiveProfilerInterface()
 	return new SifiveProfilerInterface;
 }
 
+/****************************************************************************
+     Function: DeleteSifiveProfilerInterface
+     Engineer: Arjun Suresh
+        Input: None
+       Output: None
+       return: None
+  Description: Function to delete the profiler interface class object
+               Memory allocated within a DLL should always be deleted
+               within it.
+  Date         Initials    Description
+2-Nov-2022     AS          Initial
+****************************************************************************/
+void DeleteSifiveProfilerInterface(SifiveProfilerInterface** p_sifive_profiler_intf)
+{
+    if (*p_sifive_profiler_intf)
+    {
+        delete* p_sifive_profiler_intf;
+        *p_sifive_profiler_intf = NULL;
+    }
+}

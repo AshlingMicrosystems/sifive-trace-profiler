@@ -197,6 +197,9 @@ public:
 
 // Function pointer typedef
 typedef SifiveProfilerInterface* (*fpGetSifiveProfilerInterface)();
+typedef void (*fpDeleteSifiveProfilerInterface)(SifiveProfilerInterface**);
 
 // Exported C API function that returns the pointer to the Sifive decoder class instance
 extern "C" DLLEXPORTEDAPI SifiveProfilerInterface * GetSifiveProfilerInterface();
+// Exported C API function that deletes the pointer to the Sifive decoder class instance
+extern "C" DLLEXPORTEDAPI void DeleteSifiveProfilerInterface(SifiveProfilerInterface**);
