@@ -4753,7 +4753,7 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction* inst
 
 	return ec;
 }
-TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** instInfo, uint64_t& address_out)
+TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** instInfo, ProfilerNexusMessage **nm_out, uint64_t& address_out)
 {
 	if (status != TraceDqrProfiler::DQERR_OK) 
 	{
@@ -4832,6 +4832,7 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 
 			readNewTraceMessage = false;
 			currentCore = nm.coreId;
+            *nm_out = &nm;
 
 			// if set see if HTM trace message, switch to HTM mode
 

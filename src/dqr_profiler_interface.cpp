@@ -202,8 +202,12 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
     uint64_t prev_addr = 0;
     uint64_t idx = 0;
     uint64_t total_bytes_sent = 0;
+    uint64_t inst_cnt = 0;
     uint32_t mp_buffer_size_bytes = (PROFILE_THREAD_BUFFER_SIZE * sizeof(mp_buffer[0]));
     ProfilerInstruction *instInfo = nullptr;
+    ProfilerNexusMessage *nm = nullptr;
+    uint64_t flush_offset = m_ui_file_split_size_bytes;
+    bool update_empty_file_ins_cnt = false;
 
 #if WRITE_SEND_DATA_TO_FILE == 1
     std::string file_path = std::string(SEND_DATA_FILE_DUMP_PATH) + to_string(m_thread_idx) + ".txt";
@@ -211,8 +215,59 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
 #endif
 
     // Send the packet
-    while (trace->NextInstruction(&instInfo, address_out) == TraceDqrProfiler::DQERR_OK)
+    while (trace->NextInstruction(&instInfo, &nm, address_out) == TraceDqrProfiler::DQERR_OK)
     {
+        update_empty_file_ins_cnt = false;
+        {
+            // Check if flush trace data was called
+            std::lock_guard<std::mutex> m_flush_data_offsets_guard(m_flush_data_offsets_mutex);
+            if (m_flush_data_offsets.size() > 0)
+            {
+                // Get the offet at which flush was called
+                uint64_t offset = m_flush_data_offsets.front();
+                // If the profiler has exceeded decoding that offset
+                if (nm->offset >= offset)
+                {
+                    // Remove the offset from the vector
+                    m_flush_data_offsets.pop_front();
+                    // Update the instruction count till this point to the file manager
+                    // This is not an empty file so the second argument should be false
+                    m_fp_cum_ins_cnt_callback(inst_cnt, false);
+                    // Check if flush was called at the start even before any trace data
+                    // was pushed. If so, there is no need to create an empty file and so
+                    // we do not have to report the instruction count again to account for
+                    // the creation of empty file at the end of a trace fetch or when flush
+                    // trace data is called
+                    if (offset != 0)
+                    {
+                        // If offset is not 0 then there will be an empty file
+                        // created so we need to update the instruction count with 
+                        // second argument as true. Note the instruction count will
+                        // be the same, but we need to report it since an empty file
+                        // will be created
+                        m_fp_cum_ins_cnt_callback(inst_cnt, true);
+                    }
+                    // Update the flush offset to the next UI split file offset
+                    // This is the expected flush offset, if again flush is called
+                    // before reaching this offset then the above code will be executed
+                    flush_offset = offset + m_ui_file_split_size_bytes;
+                    // Set the current instruction count to 0
+                    inst_cnt = 0;
+                }
+            }
+        }
+        // Normal Case when the profiling offset reaches the UI split file size offset
+        if (nm->offset >= flush_offset)
+        {
+            // Update the instruction count to the file manager
+            m_fp_cum_ins_cnt_callback(inst_cnt, false);
+            // Flag to mark that we have only updated the instruction count for non-empty file
+            update_empty_file_ins_cnt = true;
+            // Set the next expected flush offset
+            flush_offset += m_ui_file_split_size_bytes;
+            // Set the current instruction count to 0
+            inst_cnt = 0;
+        }
         if (idx >= PROFILE_THREAD_BUFFER_SIZE)
         {
 #if TRANSFER_DATA_OVER_SOCKET == 1
@@ -223,20 +278,11 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
             uint32_t maxSize = 0;
             uint8_t *msgPacket = msg.GetPacketToSend(&maxSize);
 
-           // printf("\nSending Header Thread ID %d", m_thread_idx);
             total_bytes_sent += m_client->write(msgPacket, maxSize);
-
-           // printf("\nWaiting for Header ACK Thread ID %d", m_thread_idx);
             WaitforACK();
-           // printf("\nReceived Header ACK Thread ID %d", m_thread_idx);
 
-            //printf("\nSending Data Thread ID %d", m_thread_idx);
             total_bytes_sent += m_client->write((uint8_t *)mp_buffer, mp_buffer_size_bytes);
-
-           // printf("\nWaiting for Data ACK Thread ID %d", m_thread_idx);
             WaitforACK();
-           // printf("\nReceived Data ACK Thread ID %d", m_thread_idx);
-            //printf("+");
 #endif
             idx = 0;
         }
@@ -246,6 +292,8 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
             fprintf(fp, "%llx\n", address_out);
 #endif
             mp_buffer[idx++] = htonll(address_out);
+            // Increment the instruction count
+            inst_cnt++;
             prev_addr = address_out;
         }
     }
@@ -260,22 +308,34 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
         msg.AttachData(reinterpret_cast<uint8_t *>(&temp), sizeof(temp));
         uint32_t maxSize = 0;
         uint8_t *msgPacket = msg.GetPacketToSend(&maxSize);
-        //printf("\n-Sending Header Thread ID %d", m_thread_idx);
+
         total_bytes_sent += m_client->write(msgPacket, maxSize);
-
-       // printf("\n-Waiting for Header ACK Thread ID %d", m_thread_idx);
         WaitforACK();
-        //printf("\n-Received Header ACK Thread ID %d", m_thread_idx);
 
-
-       // printf("\n-Sending Data Thread ID %d", m_thread_idx);
-       total_bytes_sent += m_client->write((uint8_t *) mp_buffer, size_to_send);
-       printf("\n-Total Bytes Sent : %llu", total_bytes_sent);
-
-       // printf("\n-Waiting for Data ACK Thread ID %d", m_thread_idx);
+        total_bytes_sent += m_client->write((uint8_t *) mp_buffer, size_to_send);
         WaitforACK();
-       // printf("\n-Received Data ACK Thread ID %d", m_thread_idx);
+
+        // Update the instruction count to the file manager
+        m_fp_cum_ins_cnt_callback(inst_cnt, false);
+        // Update the instruction count to the file manager again with
+        // second argument as flase to account for empty file
+        m_fp_cum_ins_cnt_callback(inst_cnt, true);
+        // Set intruction count to 0
+        inst_cnt = 0;
 #endif
+    }
+
+    // In some cases if the total trace data is an exact multiple of UI split file size and
+    // flush data or set end of data is called after profiling is complete, then the ins
+    // cnt for empty file won't be updated. Check the flag and update the cnt if that is the
+    // case. This is a rare scenario.
+    if(update_empty_file_ins_cnt)
+    {
+        // In case the profiler has reached an exact multiple of UI split file size
+        // and the flush was called or end data was called we need to report the 
+        // instruction count for empty file
+        m_fp_cum_ins_cnt_callback(inst_cnt, true);
+        inst_cnt = 0;
     }
 
 #if WRITE_SEND_DATA_TO_FILE == 1
@@ -404,8 +464,46 @@ TySifiveTraceProfileError SifiveProfilerInterface::Configure(const TProfilerConf
 	itcPrintOpts = config.itc_print_options;
 	itcPrintChannel = config.itc_print_channel;
     m_port_no = config.portno;
+    m_ui_file_split_size_bytes = config.ui_file_split_size_bytes;
 
 	return SIFIVE_TRACE_PROFILER_OK;
+}
+
+/****************************************************************************
+     Function: SetCumUIFileInsCntCallback
+     Engineer: Arjun Suresh
+        Input: fp_callback - Callback to the function that will be called
+                             with the instruction count in a UI file
+       Output: None
+       return: None
+  Description: Function to set the file instruction count callback
+  Date         Initials    Description
+13-May-2022    AS          Initial
+****************************************************************************/
+void SifiveProfilerInterface::SetCumUIFileInsCntCallback(std::function<void(uint64_t cum_ins_cnt, bool is_empty_file_idx)> fp_callback)
+{
+    m_fp_cum_ins_cnt_callback = fp_callback;
+}
+
+/****************************************************************************
+     Function: AddFlushDataOffset
+     Engineer: Arjun Suresh
+        Input: offset - The offset at which flush data was called
+       Output: None
+       return: None
+  Description: Function to set the offset at which flush data was called.
+               The profiler should call the callback with the instruction
+               count uptil this point
+  Date         Initials    Description
+13-May-2022    AS          Initial
+****************************************************************************/
+void SifiveProfilerInterface::AddFlushDataOffset(const uint64_t offset)
+{
+    // Add the flush data offset to the vector
+    {
+        std::lock_guard<std::mutex> m_flush_data_offsets_guard(m_flush_data_offsets_mutex);
+        m_flush_data_offsets.push_back(offset);
+    }
 }
 
 /****************************************************************************
@@ -421,4 +519,25 @@ TySifiveTraceProfileError SifiveProfilerInterface::Configure(const TProfilerConf
 SifiveProfilerInterface* GetSifiveProfilerInterface()
 {
 	return new SifiveProfilerInterface;
+}
+
+/****************************************************************************
+     Function: DeleteSifiveProfilerInterface
+     Engineer: Arjun Suresh
+        Input: None
+       Output: None
+       return: None
+  Description: Function to delete the profiler interface class object
+               Memory allocated within a DLL should always be deleted
+               within it.
+  Date         Initials    Description
+2-Nov-2022     AS          Initial
+****************************************************************************/
+void DeleteSifiveProfilerInterface(SifiveProfilerInterface** p_sifive_profiler_intf)
+{
+    if (*p_sifive_profiler_intf)
+    {
+        delete* p_sifive_profiler_intf;
+        *p_sifive_profiler_intf = NULL;
+    }
 }

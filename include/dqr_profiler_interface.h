@@ -12,6 +12,9 @@
 #include <cstring>
 #include <cstdint>
 #include <thread>
+#include <deque>
+#include <functional>
+#include <mutex>
 
 #include "SocketIntf.h"
 #include "dqr_profiler.h"
@@ -115,6 +118,7 @@ struct TProfilerConfig
 	TraceDqrProfiler::ITCOptions itc_print_options = TraceDqrProfiler::ITC_OPT_NLS;
 	uint32_t itc_print_channel = 0;
     uint16_t portno = 6000;
+    uint64_t ui_file_split_size_bytes = 8 * 1024;
 };
 
 // Interface Class that provides access to the decoder related
@@ -146,9 +150,10 @@ private:
 	int numAddrBits = 0;		  // Display Address as n bits
 	uint32_t addrDispFlags = 0;   // Address display formatting options
 	TraceDqrProfiler::pathType pt = TraceDqrProfiler::PATH_TO_UNIX; // Display format for path info
-	int analytics_detail = TySifiveProfilerAnalyticsLogLevel::P_DISABLE;	// Output ProfilerAnalytics
+	int analytics_detail = TySifiveProfilerAnalyticsLogLevel::P_DISABLE;// Output ProfilerAnalytics
 	int msgLevel = TySifiveProfilerMsgLogLevel::P_LEVEL_1;			    // Nexus TraceProfiler Msg logging level
-    uint16_t m_port_no = 6000;
+    uint16_t m_port_no = 6000;                                          // Default port
+    uint64_t m_ui_file_split_size_bytes = 8 * 1024;                     // Default UI file size 8KB
 
 	// ITC Print Settings
 	int itcPrintOpts = TraceDqrProfiler::ITC_OPT_NLS; // ITC Print Options
@@ -172,6 +177,9 @@ private:
     std::thread m_profiling_thread;
     uint64_t *mp_buffer = nullptr;
     uint32_t m_thread_idx = 0;
+    std::function<void(uint64_t, bool)> m_fp_cum_ins_cnt_callback = nullptr;  // Funtion pointer to set callback
+	std::mutex m_flush_data_offsets_mutex;                              // Mutex for synchronization
+	std::deque<uint64_t> m_flush_data_offsets;
 
     virtual TySifiveTraceProfileError ProfilingThread();
     virtual void CleanUp();
@@ -183,10 +191,15 @@ public:
     virtual TySifiveTraceProfileError PushTraceData(uint8_t *p_buff, const uint64_t &size);
     virtual void WaitForProfilerCompletion();
     virtual void SetEndOfData();
+    virtual void SetCumUIFileInsCntCallback(std::function<void(uint64_t cum_ins_cnt, bool is_empty_file_idx)> fp_callback);
+	virtual void AddFlushDataOffset(const uint64_t offset);
 };
 
 // Function pointer typedef
 typedef SifiveProfilerInterface* (*fpGetSifiveProfilerInterface)();
+typedef void (*fpDeleteSifiveProfilerInterface)(SifiveProfilerInterface**);
 
 // Exported C API function that returns the pointer to the Sifive decoder class instance
 extern "C" DLLEXPORTEDAPI SifiveProfilerInterface * GetSifiveProfilerInterface();
+// Exported C API function that deletes the pointer to the Sifive decoder class instance
+extern "C" DLLEXPORTEDAPI void DeleteSifiveProfilerInterface(SifiveProfilerInterface**);

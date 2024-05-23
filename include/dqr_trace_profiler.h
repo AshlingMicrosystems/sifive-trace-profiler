@@ -400,7 +400,7 @@ private:
 	int           SWTsock;
 	int           bitIndex;
 	int           msgSlices;
-	uint32_t      msgOffset;
+	uint64_t      msgOffset;
 	int           pendingMsgIndex;
 	uint8_t       msg[64];
 	bool          eom;
@@ -408,6 +408,7 @@ private:
 	int           bufferInIndex;
 	int           bufferOutIndex;
 	uint8_t       sockBuffer[2048];
+    uint64_t      prev_offset = 0;
     // Mutex to sync m_msg_queue 
     std::mutex m_msg_queue_mutex;
     // Mutex to sync m_end_of_data 

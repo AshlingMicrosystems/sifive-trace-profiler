@@ -11021,9 +11021,9 @@ TraceDqrProfiler::DQErr SliceFileParser::bufferSWT()
 
 TraceDqrProfiler::DQErr SliceFileParser::readBinaryMsg(bool& haveMsg)
 {
-	// start by stripping off end of message or end of var bytes. These would be here in the case
-	// of a wrapped buffer, or some kind of corruption
-
+    // start by stripping off end of message or end of var bytes. These would be here in the case
+    // of a wrapped buffer, or some kind of corruption
+    msgOffset = prev_offset;
 	haveMsg = false;
 
 	// if doing SWT, we may have ran out of data last time before getting an entire message
@@ -11070,7 +11070,7 @@ TraceDqrProfiler::DQErr SliceFileParser::readBinaryMsg(bool& haveMsg)
                             // Get the first byte
                             msg[0] = m_msg_queue.front();
                             m_msg_queue.pop_front();
-                            msgOffset++;
+                            prev_offset++;
                             break;
                         }
                     }
@@ -11173,7 +11173,7 @@ TraceDqrProfiler::DQErr SliceFileParser::readBinaryMsg(bool& haveMsg)
                         // Get the first byte
                         msg[pendingMsgIndex] = m_msg_queue.front();
                         m_msg_queue.pop_front();
-                        msgOffset++;
+                        prev_offset++;
                         break;
                     }
                 }
