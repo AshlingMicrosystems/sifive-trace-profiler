@@ -1513,7 +1513,7 @@ TraceDqrProfiler::DQErr ObjDump::execObjDump(const char* elfName, const char* ob
 		return TraceDqrProfiler::DQERR_ERR;
 	}
 
-	sprintf(cmd, "%s -t -d -h -l %s", objdump, elfName);
+	sprintf(cmd, "\"%s\" -t -d -h -l \"%s\"", objdump, elfName);
 
 	//  printf("cmd: '%s'\n",cmd);
 
@@ -1641,18 +1641,15 @@ TraceDqrProfiler::DQErr ObjDump::execObjDump(const char* elfName, const char* ob
 			return TraceDqrProfiler::DQERR_ERR;
 		}
 
-		const char* args[7];
+		char command[512];
+		char elf[512];
 
-		args[0] = objdump;
-		args[1] = "-t";
-		args[2] = "-d";
-		args[3] = "-h";
-		args[4] = "-l";
-		args[5] = elfName;
-		args[6] = NULL;
+		strcpy(command, objdump);
+		strcpy(elf, elfName);
 
-		execvp(args[0], (char* const*)args);
+		char* argument_list[] = { "-t", "-d", "-h", "-l", elf, NULL };
 
+		execvp(command, argument_list);
 		printf("Error: execv(): failed\n");
 
 		close(stdoutPipefd[1]);
@@ -1766,7 +1763,7 @@ bool ObjDump::isWSLookahead()
 	return false;
 }
 
-ObjDump::objDumpTokenType ObjDump::getNextLex(char* lex)
+ObjDump::objDumpTokenType ObjDump::getNextLex(char* lex, bool treat_space_as_lex)
 {
 	TraceDqrProfiler::DQErr rc;
 	int haveWS = 1;
@@ -1843,6 +1840,23 @@ ObjDump::objDumpTokenType ObjDump::getNextLex(char* lex)
 			c = pipeBuffer[pipeIndex];
 			switch (c) {
 			case ' ':
+			{
+				// Is space is not treated as lex
+				// add the space character to lex buffer
+				if (!treat_space_as_lex)
+				{
+					lex[i] = c;
+					i += 1;
+					pipeIndex += 1;
+				}
+				else
+				{
+					// If space is treated as lex token
+					// set haveLex = 1 and break
+					haveLex = 1;
+				}
+			}
+			break;
 			case '\t':
 			case '\r':
 			case '\n':
@@ -1987,7 +2001,7 @@ TraceDqrProfiler::DQErr ObjDump::parseElfName(char* elfName, enum elfType& et)
 	// get the elf file name
 
 	for (int scanning = 1; scanning; ) {
-		type = getNextLex(elfName);
+		type = getNextLex(elfName, false);
 
 		switch (type) {
 		case odtt_eol:
@@ -2015,7 +2029,7 @@ TraceDqrProfiler::DQErr ObjDump::parseElfName(char* elfName, enum elfType& et)
 
 	char lex[256];
 
-	type = getNextLex(lex);
+	type = getNextLex(lex, false);
 	if (type != odtt_colon) {
 		printf("Error: parseElfName(): expected ':', %d\n", type);
 		return TraceDqrProfiler::DQERR_ERR;
@@ -2027,7 +2041,7 @@ TraceDqrProfiler::DQErr ObjDump::parseElfName(char* elfName, enum elfType& et)
 	if (isWSLookahead() == false) {
 		// The colon we found must be a drive specify. Get rest of elf name
 		for (int scanning = 1; scanning; ) {
-			type = getNextLex(lex);
+			type = getNextLex(lex, false);
 
 			switch (type) {
 			case odtt_eol:
@@ -2056,7 +2070,7 @@ TraceDqrProfiler::DQErr ObjDump::parseElfName(char* elfName, enum elfType& et)
 		strcat(elfName, ":");
 		strcat(elfName, lex);
 
-		type = getNextLex(lex);
+		type = getNextLex(lex, false);
 		if (type != odtt_colon) {
 			printf("Error: parseElfName(): expected ':', %d\n", type);
 			return TraceDqrProfiler::DQERR_ERR;

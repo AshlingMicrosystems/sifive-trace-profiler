@@ -204,8 +204,8 @@ private:
 	int cachedSymIndex;
 
 	long      numSyms;
-	Sym* symLst;
-	Sym** symPtrArray;
+	Sym* symLst = nullptr;
+	Sym** symPtrArray = nullptr;
 
 	TraceDqrProfiler::DQErr fixupFunctionSizes();
 };
@@ -265,7 +265,7 @@ private:
 #endif
 	TraceDqrProfiler::DQErr execObjDump(const char* elfName, const char* objdumpPath);
 	TraceDqrProfiler::DQErr fillPipeBuffer();
-	objDumpTokenType getNextLex(char* lex);
+	objDumpTokenType getNextLex(char* lex, bool treat_space_as_lex = true);
 	bool isWSLookahead();
 	bool isStringAHexNumber(char* s, uint64_t& n);
 	bool isStringADecNumber(char* s, uint64_t& n);
