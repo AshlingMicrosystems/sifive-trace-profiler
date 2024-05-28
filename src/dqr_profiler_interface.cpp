@@ -147,6 +147,8 @@ TySifiveTraceProfileError SifiveProfilerInterface::StartProfilingThread(uint32_t
 ****************************************************************************/
 void SifiveProfilerInterface::SetEndOfData()
 {
+    if (trace == NULL)
+        return;
     trace->SetEndOfData();
 }
 
@@ -163,6 +165,8 @@ void SifiveProfilerInterface::SetEndOfData()
 ****************************************************************************/
 TySifiveTraceProfileError SifiveProfilerInterface::PushTraceData(uint8_t *p_buff, const uint64_t& size)
 {
+    if (trace == NULL)
+        return SIFIVE_TRACE_PROFILER_MEM_CREATE_ERR;
     return (trace->PushTraceData(p_buff, size) == TraceDqrProfiler::DQERR_OK) ? SIFIVE_TRACE_PROFILER_OK : SIFIVE_TRACE_PROFILER_ERR;
 }
 
