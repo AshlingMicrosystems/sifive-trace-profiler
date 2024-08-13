@@ -20,6 +20,7 @@
 #include "SocketIntf.h"
 #include "dqr_profiler_interface.h"
 #include "PacketFormat.h"
+#include "logger.h"
 
 #ifdef __linux__
 
@@ -79,17 +80,22 @@ uint64_t htonll(uint64_t src)
 ****************************************************************************/
 TySifiveTraceProfileError SifiveProfilerInterface::StartProfilingThread(uint32_t thread_idx)
 {
+    {
+        std::lock_guard<std::mutex> m_abort_profiling_mutex_guard(m_abort_profiling_mutex);
+        m_abort_profiling = false;
+    }
+
     trace = new (std::nothrow) TraceProfiler(tf_name, ef_name, numAddrBits, addrDispFlags, srcbits, od_name, freq);
     if (trace == nullptr)
     {
-        printf("Error: Could not create TraceProfiler object\n");
+        LOG_ERR("Could not create Trace Profiler instance");
         CleanUp();
         return SIFIVE_TRACE_PROFILER_MEM_CREATE_ERR;
     }
 
     if (trace->getStatus() != TraceDqrProfiler::DQERR_OK)
     {
-        printf("Error: new TraceProfiler(%s,%s) failed\n", tf_name, ef_name);
+        LOG_ERR("Trace Profiler Status Error");
         CleanUp();
         return SIFIVE_TRACE_PROFILER_TRACE_STATUS_ERROR;
     }
@@ -102,31 +108,49 @@ TySifiveTraceProfileError SifiveProfilerInterface::StartProfilingThread(uint32_t
 
 #if TRANSFER_DATA_OVER_SOCKET == 1
     m_client = new SocketIntf(m_port_no);
+    if (m_client == NULL)
+    {
+        LOG_ERR("Unable to create Socket Intf");
+        return SIFIVE_TRACE_PROFILER_MEM_CREATE_ERR;
+    }
+
     if (m_client->open() != 0)
+    {
+        LOG_ERR("Unable to Open Socket");
         return SIFIVE_TRACE_PROFILER_ERR;
-    // Send the packet
+    }
+
+    // Send the Thread ID to UI
     PICP msg(32, PICP_TYPE_INTERNAL, PICP_CMD_BULK_WRITE);
-    uint32_t temp = htonl(thread_idx);
-    msg.AttachData(reinterpret_cast<uint8_t *>(&temp), sizeof(temp));
-    uint32_t maxSize = 0;
-    uint8_t *msgPacket = msg.GetPacketToSend(&maxSize);
-    m_client->write(msgPacket, maxSize);
-    WaitforACK();
+    uint32_t thread_idx_nw_byte_order = htonl(thread_idx);
+    msg.AttachData(reinterpret_cast<uint8_t *>(&thread_idx_nw_byte_order), sizeof(thread_idx_nw_byte_order));
+    uint32_t max_size = 0;
+    uint8_t *msg_packet = msg.GetPacketToSend(&max_size);
+    m_client->write(msg_packet, max_size);
+
+    if (!WaitforACK())
+    {
+        LOG_DEBUG("Error in ACK");
+        return SIFIVE_TRACE_PROFILER_ACK_ERR;
+    }
 #endif
 
     mp_buffer = new uint64_t[PROFILE_THREAD_BUFFER_SIZE];
     if (mp_buffer == nullptr)
     {
+        LOG_ERR("Unable to Create Socket Buffer");
         CleanUp();
         return SIFIVE_TRACE_PROFILER_MEM_CREATE_ERR;
     }
 
     try
     { 
+        LOG_DEBUG("Creating Profiling Thread [%u]", m_thread_idx);
         m_profiling_thread = std::thread(&SifiveProfilerInterface::ProfilingThread, this);
     }
     catch (...)
     {
+        LOG_ERR("Error in creating Profiling Thread [%u]", m_thread_idx);
         return SIFIVE_TRACE_PROFILER_ERR;
     }
 
@@ -184,9 +208,65 @@ TySifiveTraceProfileError SifiveProfilerInterface::PushTraceData(uint8_t *p_buff
 ****************************************************************************/
 void SifiveProfilerInterface::WaitForProfilerCompletion()
 {
+    LOG_DEBUG("Joining Profiler Thread");
     if (m_profiling_thread.joinable())
         m_profiling_thread.join();
+
     CleanUp();
+    LOG_DEBUG("Cleanup Complete");
+}
+
+/****************************************************************************
+     Function: FlushDataOverSocket
+     Engineer: Arjun Suresh
+        Input: None
+       Output: None
+       return: TySifiveTraceProfileError
+  Description: Writes the socket buffer data to the socket
+  Date         Initials    Description
+  26-Apr-2024  AS          Initial
+****************************************************************************/
+TySifiveTraceProfileError SifiveProfilerInterface::FlushDataOverSocket()
+{
+    // Create the Size Packet
+    const uint32_t size_to_send = (m_curr_buff_idx * sizeof(mp_buffer[0]));
+    PICP msg(32, PICP_TYPE_INTERNAL, PICP_CMD_BULK_WRITE);
+    uint32_t size_to_send_nw_byte_order = htonl(size_to_send);
+    msg.AttachData(reinterpret_cast<uint8_t*>(&size_to_send_nw_byte_order), sizeof(size_to_send_nw_byte_order));
+    uint32_t max_size = 0;
+    uint8_t* msg_packet = msg.GetPacketToSend(&max_size);
+
+    LOG_DEBUG("Sending Size Packet");
+    int32_t send_bytes = m_client->write(msg_packet, max_size);
+    if (send_bytes <= 0)
+    {
+        LOG_DEBUG("Error in sending packet");
+        return SIFIVE_TRACE_PROFILER_ERR;
+    }
+
+    if (!WaitforACK())
+    {
+        LOG_DEBUG("Error in ACK");
+        return SIFIVE_TRACE_PROFILER_ACK_ERR;
+    }
+
+    LOG_DEBUG("Sending Data");
+    send_bytes = m_client->write((uint8_t*)mp_buffer, size_to_send);
+    if (send_bytes <= 0)
+    {
+        LOG_DEBUG("Error in sending packet");
+        return SIFIVE_TRACE_PROFILER_ERR;
+    }
+
+    if (!WaitforACK())
+    {
+        LOG_DEBUG("Error in ACK");
+        return SIFIVE_TRACE_PROFILER_ACK_ERR;
+    }
+
+    m_curr_buff_idx = 0;
+
+    return SIFIVE_TRACE_PROFILER_OK;
 }
 
 /****************************************************************************
@@ -204,7 +284,6 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
 {
     uint64_t address_out = 0;
     uint64_t prev_addr = 0;
-    uint64_t idx = 0;
     uint64_t total_bytes_sent = 0;
     uint64_t inst_cnt = 0;
     uint32_t mp_buffer_size_bytes = (PROFILE_THREAD_BUFFER_SIZE * sizeof(mp_buffer[0]));
@@ -212,6 +291,7 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
     ProfilerNexusMessage *nm = nullptr;
     uint64_t flush_offset = m_ui_file_split_size_bytes;
     bool update_empty_file_ins_cnt = false;
+    m_curr_buff_idx = 0;
 
 #if WRITE_SEND_DATA_TO_FILE == 1
     std::string file_path = std::string(SEND_DATA_FILE_DUMP_PATH) + to_string(m_thread_idx) + ".txt";
@@ -221,6 +301,14 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
     // Send the packet
     while (trace->NextInstruction(&instInfo, &nm, address_out) == TraceDqrProfiler::DQERR_OK)
     {
+        {
+            std::lock_guard<std::mutex> m_abort_profiling_mutex_guard(m_abort_profiling_mutex);
+            if (m_abort_profiling)
+            {
+                LOG_ERR("Aborting Profiling");
+                break;
+            }
+        }
         update_empty_file_ins_cnt = false;
         {
             // Check if flush trace data was called
@@ -272,61 +360,50 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
             // Set the current instruction count to 0
             inst_cnt = 0;
         }
-        if (idx >= PROFILE_THREAD_BUFFER_SIZE)
         {
+            std::lock_guard<std::mutex> m_buffer_data_mutex_guard(m_buffer_data_mutex);
+            if (m_curr_buff_idx >= PROFILE_THREAD_BUFFER_SIZE)
+            {
 #if TRANSFER_DATA_OVER_SOCKET == 1
-            // Send the packet
-            PICP msg(32, PICP_TYPE_INTERNAL, PICP_CMD_BULK_WRITE);
-            uint32_t temp = htonl(mp_buffer_size_bytes);
-            msg.AttachData(reinterpret_cast<uint8_t *>(&temp), sizeof(temp));
-            uint32_t maxSize = 0;
-            uint8_t *msgPacket = msg.GetPacketToSend(&maxSize);
-
-            total_bytes_sent += m_client->write(msgPacket, maxSize);
-            WaitforACK();
-
-            total_bytes_sent += m_client->write((uint8_t *)mp_buffer, mp_buffer_size_bytes);
-            WaitforACK();
+                if (SIFIVE_TRACE_PROFILER_OK != FlushDataOverSocket())
+                {
+                    break;
+                }
 #endif
-            idx = 0;
+            }
         }
         if (address_out != prev_addr)
         {
 #if WRITE_SEND_DATA_TO_FILE == 1
             fprintf(fp, "%llx\n", address_out);
 #endif
-            mp_buffer[idx++] = htonll(address_out);
+            {
+                std::lock_guard<std::mutex> m_buffer_data_mutex_guard(m_buffer_data_mutex);
+                mp_buffer[m_curr_buff_idx++] = htonll(address_out);
+            }
             // Increment the instruction count
             inst_cnt++;
             prev_addr = address_out;
         }
+            
     }
 
-    if (idx > 0)
     {
+        std::lock_guard<std::mutex> m_buffer_data_mutex_guard(m_buffer_data_mutex);
+        if (m_curr_buff_idx > 0)
+        {
 #if TRANSFER_DATA_OVER_SOCKET == 1
-        // Send the packet
-        uint32_t size_to_send = (idx * sizeof(mp_buffer[0]));
-        PICP msg(32, PICP_TYPE_INTERNAL, PICP_CMD_BULK_WRITE);
-        uint32_t temp = htonl(size_to_send);
-        msg.AttachData(reinterpret_cast<uint8_t *>(&temp), sizeof(temp));
-        uint32_t maxSize = 0;
-        uint8_t *msgPacket = msg.GetPacketToSend(&maxSize);
+            FlushDataOverSocket();
 
-        total_bytes_sent += m_client->write(msgPacket, maxSize);
-        WaitforACK();
-
-        total_bytes_sent += m_client->write((uint8_t *) mp_buffer, size_to_send);
-        WaitforACK();
-
-        // Update the instruction count to the file manager
-        m_fp_cum_ins_cnt_callback(inst_cnt, false);
-        // Update the instruction count to the file manager again with
-        // second argument as flase to account for empty file
-        m_fp_cum_ins_cnt_callback(inst_cnt, true);
-        // Set intruction count to 0
-        inst_cnt = 0;
+            // Update the instruction count to the file manager
+            m_fp_cum_ins_cnt_callback(inst_cnt, false);
+            // Update the instruction count to the file manager again with
+            // second argument as flase to account for empty file
+            m_fp_cum_ins_cnt_callback(inst_cnt, true);
+            // Set intruction count to 0
+            inst_cnt = 0;
 #endif
+        }
     }
 
     // In some cases if the total trace data is an exact multiple of UI split file size and
@@ -354,6 +431,7 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
         m_client = nullptr;
     }
 #endif
+    LOG_DEBUG("Exiting Profiling Thread");
     return SIFIVE_TRACE_PROFILER_OK;
 }
 
@@ -367,14 +445,17 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
   Date         Initials    Description
   26-Apr-2024  AS          Initial
 ****************************************************************************/
-void SifiveProfilerInterface::WaitforACK()
+bool SifiveProfilerInterface::WaitforACK()
 {
     uint32_t maxSize = 64;
     uint8_t buff[64] = { 0 };
+
+    LOG_DEBUG("Waiting For ACK");
     int32_t recvSize = m_client->read(buff, &maxSize);
     if (recvSize < static_cast<int>(PICP::GetMinimumSize()))
     {
-        printf("\nSocket Error");
+        LOG_ERR("Socket Error");
+        return false;
     }
     else
     {
@@ -385,11 +466,14 @@ void SifiveProfilerInterface::WaitforACK()
             {
                 if (retPacket.GetResponse() != 0xDEADBEEF)
                 {
-                    printf("\nCRC Failed");
+                    LOG_ERR("CRC Failed Expected [0xDEADBEEF], Received [%x]", retPacket.GetResponse());
+                    return false;
                 }
             }
         }
     }
+    LOG_DEBUG("ACK Received");
+    return true;
 }
 
 /****************************************************************************
@@ -405,6 +489,7 @@ void SifiveProfilerInterface::WaitforACK()
 void SifiveProfilerInterface::CleanUp()
 {
 #if TRANSFER_DATA_OVER_SOCKET == 1
+    LOG_DEBUG("Closing socket");
     if (m_client)
     {
         m_client->close();
@@ -412,19 +497,17 @@ void SifiveProfilerInterface::CleanUp()
         m_client = nullptr;
     }
 #endif
+    LOG_DEBUG("Deleting Socket Buffer");
     if (mp_buffer)
     {
         delete[] mp_buffer;
         mp_buffer = nullptr;
     }
-	if (fp != nullptr)
-	{
-		fclose(fp);
-		fp = nullptr;
-	}
-	if (trace != nullptr) {
-		trace->cleanUp();
 
+    LOG_DEBUG("Trace Class Clenup");
+	if (trace != nullptr) {
+        
+		trace->cleanUp();
 		delete trace;
 		trace = nullptr;
 	}
@@ -503,10 +586,36 @@ void SifiveProfilerInterface::SetCumUIFileInsCntCallback(std::function<void(uint
 ****************************************************************************/
 void SifiveProfilerInterface::AddFlushDataOffset(const uint64_t offset)
 {
+    LOG_DEBUG("Adding Flush Data Offset %llu", offset);
     // Add the flush data offset to the vector
     {
         std::lock_guard<std::mutex> m_flush_data_offsets_guard(m_flush_data_offsets_mutex);
         m_flush_data_offsets.push_back(offset);
+    }
+
+    LOG_DEBUG("Flush data over socket");
+    {
+        std::lock_guard<std::mutex> m_buffer_data_mutex_guard(m_buffer_data_mutex);
+        FlushDataOverSocket();
+    }
+}
+
+/****************************************************************************
+     Function: AbortProfiling
+     Engineer: Arjun Suresh
+        Input: None
+       Output: None
+       return: None
+  Description: Sets the profiling abort flag
+  Date         Initials    Description
+13-May-2022    AS          Initial
+****************************************************************************/
+void SifiveProfilerInterface::AbortProfiling()
+{
+    LOG_DEBUG("Setting Abort Profiling Flag");
+    {
+        std::lock_guard<std::mutex> m_abort_profiling_mutex_guard(m_abort_profiling_mutex);
+        m_abort_profiling = true;
     }
 }
 
@@ -522,6 +631,7 @@ void SifiveProfilerInterface::AddFlushDataOffset(const uint64_t offset)
 ****************************************************************************/
 SifiveProfilerInterface* GetSifiveProfilerInterface()
 {
+    LOG_DEBUG("Creating Sifive Profiler Interface");
 	return new SifiveProfilerInterface;
 }
 
@@ -539,6 +649,7 @@ SifiveProfilerInterface* GetSifiveProfilerInterface()
 ****************************************************************************/
 void DeleteSifiveProfilerInterface(SifiveProfilerInterface** p_sifive_profiler_intf)
 {
+    LOG_DEBUG("Deleting Sifive Profiler Interface");
     if (*p_sifive_profiler_intf)
     {
         delete* p_sifive_profiler_intf;

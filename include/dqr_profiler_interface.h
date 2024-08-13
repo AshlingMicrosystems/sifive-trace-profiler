@@ -58,6 +58,7 @@ typedef enum
 	SIFIVE_TRACE_PROFILER_SIM_STATUS_ERROR,
 	SIFIVE_TRACE_PROFILER_VCD_STATUS_ERROR,
 	SIFIVE_TRACE_PROFILER_TRACE_STATUS_ERROR,
+	SIFIVE_TRACE_PROFILER_ACK_ERR,
 	SIFIVE_TRACE_PROFILER_ERR
 } TySifiveTraceProfileError;
 
@@ -172,18 +173,23 @@ private:
 	int archSize = TySifiveProfilerTargetArchSize::P_ARCH_GET_FROM_ELF;	// Target Architecture Size (32/64)
 
 	TraceProfiler* trace = nullptr;
-	FILE* fp = nullptr;
     SocketIntf *m_client = nullptr;
     std::thread m_profiling_thread;
     uint64_t *mp_buffer = nullptr;
     uint32_t m_thread_idx = 0;
     std::function<void(uint64_t, bool)> m_fp_cum_ins_cnt_callback = nullptr;  // Funtion pointer to set callback
-	std::mutex m_flush_data_offsets_mutex;                              // Mutex for synchronization
+	std::mutex m_flush_data_offsets_mutex;                                    // Mutex for synchronization
+	std::mutex m_buffer_data_mutex;											  // Mutex for synchronization
+	bool m_flush_socket_data = false;
 	std::deque<uint64_t> m_flush_data_offsets;
+	uint64_t m_curr_buff_idx = 0;
+	std::mutex m_abort_profiling_mutex;
+	bool m_abort_profiling = false;
 
     virtual TySifiveTraceProfileError ProfilingThread();
     virtual void CleanUp();
-    virtual void WaitforACK();
+    virtual bool WaitforACK();
+	virtual TySifiveTraceProfileError FlushDataOverSocket();
 public:
 	virtual TySifiveTraceProfileError Configure(const TProfilerConfig& config);
 	virtual ~SifiveProfilerInterface() { CleanUp(); }
@@ -193,6 +199,7 @@ public:
     virtual void SetEndOfData();
     virtual void SetCumUIFileInsCntCallback(std::function<void(uint64_t cum_ins_cnt, bool is_empty_file_idx)> fp_callback);
 	virtual void AddFlushDataOffset(const uint64_t offset);
+	virtual void AbortProfiling();
 };
 
 // Function pointer typedef
