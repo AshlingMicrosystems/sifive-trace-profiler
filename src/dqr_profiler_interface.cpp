@@ -650,6 +650,12 @@ TySifiveTraceProfileError SifiveProfilerInterface::AddrSearchThread(const TProfA
             inst_cnt++;
             prev_addr = address_out;
 
+            // If we have reached the stop idx, we can simply return
+            if (inst_cnt >= search_params.stop_ui_file_pos)
+            {
+                return SIFIVE_TRACE_PROFILER_OK;
+            }
+
             if (search_params.search_within_range)
             {
                 // Check if address is within the search range, if search_within_range is set

@@ -127,9 +127,10 @@ struct TProfAddrSearchParams
 {
 	uint64_t addr_start;                    // Starting address of the search range
 	uint64_t address_end;                   // Ending address of the search range
-	uint64_t start_ui_file_idx;             // Search will begin from this UI idx
-	uint64_t start_ui_file_pos;             // Search will begin from this instruction position within the UI idx (excluding this address)
-	uint64_t stop_ui_file_idx;              // Search will stop after this UI idx
+	uint64_t start_ui_file_idx;             // Search will begin from this UI idx. This idx is inclusive.
+	uint64_t start_ui_file_pos;             // Search will begin from this instruction position within the start UI idx (excluding this address).
+	uint64_t stop_ui_file_idx;              // Search will stop at this idx. This idx is excluded from search
+	uint64_t stop_ui_file_pos;              // Search will stop at this instruction position within the stop UI idx (excluding this addres).
 	bool search_within_range;               // If set to true, search will return an address which satisfies (addr >= addr_start && addr_start < address_end), else search will return position of addr_start.
 };
 
