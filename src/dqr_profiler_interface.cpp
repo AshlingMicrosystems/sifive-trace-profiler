@@ -545,3 +545,207 @@ void DeleteSifiveProfilerInterface(SifiveProfilerInterface** p_sifive_profiler_i
         *p_sifive_profiler_intf = NULL;
     }
 }
+
+/****************************************************************************
+     Function: StartAddrSearchThread
+     Engineer: Arjun Suresh
+        Input: search_params - params to configure the search conditions
+               dir - Direction of search
+       Output: None
+       return: TySifiveTraceProfileError
+  Description: Starts the address search thread
+               the PC samples
+  Date         Initials    Description
+  26-Apr-2024  AS          Initial
+****************************************************************************/
+TySifiveTraceProfileError SifiveProfilerInterface::StartAddrSearchThread(const TProfAddrSearchParams& search_params, const TProfAddrSearchDir& dir)
+{
+    trace = new (std::nothrow) TraceProfiler(tf_name, ef_name, numAddrBits, addrDispFlags, srcbits, od_name, freq);
+    if (trace == nullptr)
+    {
+        printf("Error: Could not create TraceProfiler object\n");
+        CleanUp();
+        return SIFIVE_TRACE_PROFILER_MEM_CREATE_ERR;
+    }
+
+    if (trace->getStatus() != TraceDqrProfiler::DQERR_OK)
+    {
+        printf("Error: new TraceProfiler(%s,%s) failed\n", tf_name, ef_name);
+        CleanUp();
+        return SIFIVE_TRACE_PROFILER_TRACE_STATUS_ERROR;
+    }
+
+    trace->setTraceType(traceType);
+    trace->setTSSize(tssize);
+    trace->setPathType(pt);
+
+    try
+    {
+        m_addr_search_thread = std::thread(&SifiveProfilerInterface::AddrSearchThread, this, search_params, dir);
+    }
+    catch (...)
+    {
+        return SIFIVE_TRACE_PROFILER_ERR;
+    }
+
+    return SIFIVE_TRACE_PROFILER_OK;
+}
+
+/****************************************************************************
+     Function: SymbolSearchThread
+     Engineer: Arjun Suresh
+        Input: search_params - params to configure the search conditions
+               dir - Direction of search
+       Output: None
+       return: TySifiveTraceProfileError
+  Description: Function to search for a symbol in trace data
+  Date         Initials    Description
+  26-Apr-2024  AS          Initial
+****************************************************************************/
+TySifiveTraceProfileError SifiveProfilerInterface::AddrSearchThread(const TProfAddrSearchParams& search_params, const TProfAddrSearchDir& dir)
+{
+    uint64_t address_out = 0;
+    uint64_t prev_addr = 0;
+    uint64_t inst_cnt = 0;
+    ProfilerInstruction* instInfo = nullptr;
+    ProfilerNexusMessage* nm = nullptr;
+    m_addr_search_out.addr_found = false;
+    m_addr_search_out.ui_file_idx = 0;
+    m_addr_search_out.ins_pos = 0;
+    
+    // Search always starts one file behind the search_params.start_ui_file_idx value. This is to ensure that the profiler
+    // gets a sync point to start decoding. We ingore the data from the previous file.
+    uint64_t curr_ui_file_idx = ((search_params.start_ui_file_idx <= 1) ? search_params.start_ui_file_idx : (search_params.start_ui_file_idx - 1));
+
+    // Loop through the decoded instructions
+    while (trace->NextInstruction(&instInfo, &nm, address_out) == TraceDqrProfiler::DQERR_OK)
+    {
+        // If the curr index exceeds the stop idx, we can return
+        if (curr_ui_file_idx >= search_params.stop_ui_file_idx)
+        {
+            return SIFIVE_TRACE_PROFILER_OK;
+        }
+        {
+            // Check if flush data is called. This gives us info about the bounday of an encoded file
+            std::lock_guard<std::mutex> m_flush_data_offsets_guard(m_flush_data_offsets_mutex);
+            if (m_flush_data_offsets.size() > 0)
+            {
+                // Get the offet at which flush was called
+                uint64_t offset = m_flush_data_offsets.front();
+                // If the profiler has exceeded decoding that offset
+                if (nm->offset >= offset)
+                {
+                    // Remove the offset from the vector
+                    m_flush_data_offsets.pop_front();
+                    // Set the current instruction count to 0
+                    inst_cnt = 0;
+                    // Update the UI file idx
+                    curr_ui_file_idx++;
+                }
+            }
+        }
+        if (address_out != prev_addr)
+        {  
+            // If we get a new address, increment the ins count
+            inst_cnt++;
+            prev_addr = address_out;
+
+            // If we have reached the stop idx, we can simply return
+            if (inst_cnt >= search_params.stop_ui_file_pos)
+            {
+                return SIFIVE_TRACE_PROFILER_OK;
+            }
+
+            if (search_params.search_within_range)
+            {
+                // Check if address is within the search range, if search_within_range is set
+                if ((address_out >= search_params.addr_start) && (address_out < search_params.address_end))
+                { 
+                    // We should only return true if we find an address after the start ui idx and position
+                    // Ignore anything before this point.
+                    if ((curr_ui_file_idx < search_params.start_ui_file_idx) || (curr_ui_file_idx == search_params.start_ui_file_idx && inst_cnt <= search_params.start_ui_file_pos))
+                    {
+                        // Skip
+                    }
+                    else
+                    {
+                        // Address found
+                        {
+                            std::lock_guard<std::mutex> m_flush_data_offsets_guard(m_flush_data_offsets_mutex);
+                            m_addr_search_out.addr_found = true;
+                            m_addr_search_out.ui_file_idx = curr_ui_file_idx;
+                            m_addr_search_out.ins_pos = inst_cnt;
+                            if(dir == PROF_SEARCH_FORWARD)
+                                return SIFIVE_TRACE_PROFILER_OK;
+                        }
+
+                    }
+                }
+            }
+            else
+            {
+                // Check if the address is an exact match
+                if (address_out == search_params.addr_start)
+                {
+                    // We should only return true if we find an address after the start ui idx and position
+                    // Ignore anything before this point.
+                    if ((curr_ui_file_idx < search_params.start_ui_file_idx) || (curr_ui_file_idx == search_params.start_ui_file_idx && inst_cnt <= search_params.start_ui_file_pos))
+                    {
+                        // Skip
+                    }
+                    else
+                    {
+                        // Address found
+                        {
+                            std::lock_guard<std::mutex> m_flush_data_offsets_guard(m_flush_data_offsets_mutex);
+                            m_addr_search_out.addr_found = true;
+                            m_addr_search_out.ui_file_idx = curr_ui_file_idx;
+                            m_addr_search_out.ins_pos = inst_cnt;
+                            if (dir == PROF_SEARCH_FORWARD)
+                                return SIFIVE_TRACE_PROFILER_OK;
+                        }
+
+                    }
+                }
+            }
+        }
+    }
+
+    return SIFIVE_TRACE_PROFILER_OK;
+}
+
+/****************************************************************************
+     Function: IsSearchAddressFound
+     Engineer: Arjun Suresh
+        Input: None
+       Output: addr_loc - output of search
+       return: bool
+  Description: Function to check if address is found during search
+  Date         Initials    Description
+  26-Apr-2024  AS          Initial
+****************************************************************************/
+bool SifiveProfilerInterface::IsSearchAddressFound(TProfAddrSearchOut& addr_loc)
+{
+    std::lock_guard<std::mutex> m_search_addr_guard(m_search_addr_mutex);
+    addr_loc.addr_found = m_addr_search_out.addr_found;
+    addr_loc.ui_file_idx = m_addr_search_out.ui_file_idx;
+    addr_loc.ins_pos = m_addr_search_out.ins_pos;
+    return m_addr_search_out.addr_found;
+}
+
+/****************************************************************************
+     Function: WaitForSymbolSearchCompletion
+     Engineer: Arjun Suresh
+        Input: None
+       Output: None
+       return: None
+  Description: Waits until addr search thread is complete
+  Date         Initials    Description
+  26-Apr-2024  AS          Initial
+****************************************************************************/
+void SifiveProfilerInterface::WaitForAddrSearchCompletion()
+{
+    if (m_addr_search_thread.joinable())
+        m_addr_search_thread.join();
+    CleanUp();
+}

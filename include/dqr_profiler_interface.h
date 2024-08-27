@@ -121,6 +121,34 @@ struct TProfilerConfig
     uint64_t ui_file_split_size_bytes = 8 * 1024;
 };
 
+// Structure to represent the parameters needed for searching
+// a particular address in the decoded trace data
+struct TProfAddrSearchParams
+{
+	uint64_t addr_start;                    // Starting address of the search range
+	uint64_t address_end;                   // Ending address of the search range
+	uint64_t start_ui_file_idx;             // Search will begin from this UI idx. This idx is inclusive.
+	uint64_t start_ui_file_pos;             // Search will begin from this instruction position within the start UI idx (excluding this address).
+	uint64_t stop_ui_file_idx;              // Search will stop at this idx. This idx is excluded from search
+	uint64_t stop_ui_file_pos;              // Search will stop at this instruction position within the stop UI idx (excluding this addres).
+	bool search_within_range;               // If set to true, search will return an address which satisfies (addr >= addr_start && addr_start < address_end), else search will return position of addr_start.
+};
+
+// Structure to represent location of an address in the decoded trace data
+struct TProfAddrSearchOut
+{
+	bool addr_found = false;
+	uint64_t ui_file_idx = 0;
+	uint64_t ins_pos = 0;
+};
+
+// Structure to represent location of an address in the decoded trace data
+typedef enum
+{
+	PROF_SEARCH_BACK = 0,
+	PROF_SEARCH_FORWARD = 1
+}TProfAddrSearchDir;
+
 // Interface Class that provides access to the decoder related
 // functionality
 class SifiveProfilerInterface
@@ -175,11 +203,14 @@ private:
 	FILE* fp = nullptr;
     SocketIntf *m_client = nullptr;
     std::thread m_profiling_thread;
+	std::thread m_addr_search_thread;
     uint64_t *mp_buffer = nullptr;
     uint32_t m_thread_idx = 0;
     std::function<void(uint64_t, bool)> m_fp_cum_ins_cnt_callback = nullptr;  // Funtion pointer to set callback
 	std::mutex m_flush_data_offsets_mutex;                              // Mutex for synchronization
+	std::mutex m_search_addr_mutex;
 	std::deque<uint64_t> m_flush_data_offsets;
+	TProfAddrSearchOut m_addr_search_out;
 
     virtual TySifiveTraceProfileError ProfilingThread();
     virtual void CleanUp();
@@ -190,9 +221,13 @@ public:
     virtual TySifiveTraceProfileError StartProfilingThread(uint32_t thread_idx);
     virtual TySifiveTraceProfileError PushTraceData(uint8_t *p_buff, const uint64_t &size);
     virtual void WaitForProfilerCompletion();
+	virtual void WaitForAddrSearchCompletion();
     virtual void SetEndOfData();
     virtual void SetCumUIFileInsCntCallback(std::function<void(uint64_t cum_ins_cnt, bool is_empty_file_idx)> fp_callback);
 	virtual void AddFlushDataOffset(const uint64_t offset);
+	virtual TySifiveTraceProfileError StartAddrSearchThread(const TProfAddrSearchParams& search_params, const TProfAddrSearchDir& dir);
+	virtual TySifiveTraceProfileError AddrSearchThread(const TProfAddrSearchParams& search_params, const TProfAddrSearchDir& dir);
+	virtual bool IsSearchAddressFound(TProfAddrSearchOut& addr_out);
 };
 
 // Function pointer typedef
