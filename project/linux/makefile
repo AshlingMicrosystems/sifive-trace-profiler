@@ -40,7 +40,8 @@ ALL_OBJS=	$(OUTDIR)/dqr_profiler_interface.o \
 			$(OUTDIR)/dqr_trace_profiler.o \
 			$(OUTDIR)/SocketIntf.o \
 			$(OUTDIR)/PacketFormat.o \
-			$(OUTDIR)/linuxutils.o
+			$(OUTDIR)/linuxutils.o \
+			$(OUTDIR)/logger.o
 
 # Pattern rules
 $(OUTDIR)/%.o : ../../src/%.cpp
