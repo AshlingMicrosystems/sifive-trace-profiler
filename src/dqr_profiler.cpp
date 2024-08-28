@@ -9127,6 +9127,8 @@ SliceFileParser::~SliceFileParser()
 	if (tf.is_open()) {
 		tf.close();
 	}
+	std::lock_guard<std::mutex> msg_queue_guard(m_msg_queue_mutex);
+	m_msg_queue.clear();
 
 //	if (SWTsock >= 0) {
 //#ifdef WINDOWS

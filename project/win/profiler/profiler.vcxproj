@@ -38,6 +38,7 @@
     <ClCompile Include="..\..\..\src\dqr_profiler.cpp" />
     <ClCompile Include="..\..\..\src\dqr_profiler_interface.cpp" />
     <ClCompile Include="..\..\..\src\dqr_trace_profiler.cpp" />
+    <ClCompile Include="..\..\..\src\logger.cpp" />
     <ClCompile Include="..\..\..\src\PacketFormat.cpp" />
     <ClCompile Include="..\..\..\src\SocketIntf.cpp" />
   </ItemGroup>
@@ -243,7 +244,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WINDOWS;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WINDOWS;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS;_LOGGING_ENABLED=1;_LOGGING_LEVEL=0</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <Optimization>Disabled</Optimization>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
@@ -283,7 +284,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WINDOWS;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WINDOWS;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS;_LOGGING_ENABLED=1;_LOGGING_LEVEL=0</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <Optimization>MaxSpeed</Optimization>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
