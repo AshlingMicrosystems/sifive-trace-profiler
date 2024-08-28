@@ -240,13 +240,13 @@ TySifiveTraceProfileError SifiveProfilerInterface::FlushDataOverSocket()
     int32_t send_bytes = m_client->write(msg_packet, max_size);
     if (send_bytes <= 0)
     {
-        LOG_DEBUG("Error in sending packet");
+        LOG_ERR("Error in sending packet");
         return SIFIVE_TRACE_PROFILER_ERR;
     }
 
     if (!WaitforACK())
     {
-        LOG_DEBUG("Error in ACK");
+        LOG_ERR("Error in ACK");
         return SIFIVE_TRACE_PROFILER_ACK_ERR;
     }
 
@@ -254,13 +254,13 @@ TySifiveTraceProfileError SifiveProfilerInterface::FlushDataOverSocket()
     send_bytes = m_client->write((uint8_t*)mp_buffer, size_to_send);
     if (send_bytes <= 0)
     {
-        LOG_DEBUG("Error in sending packet");
+        LOG_ERR("Error in sending packet");
         return SIFIVE_TRACE_PROFILER_ERR;
     }
 
     if (!WaitforACK())
     {
-        LOG_DEBUG("Error in ACK");
+        LOG_ERR("Error in ACK");
         return SIFIVE_TRACE_PROFILER_ACK_ERR;
     }
 
@@ -290,26 +290,36 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
     ProfilerInstruction *instInfo = nullptr;
     ProfilerNexusMessage *nm = nullptr;
     uint64_t flush_offset = m_ui_file_split_size_bytes;
-    bool update_empty_file_ins_cnt = false;
+    bool update_ins_cnt_for_empty_file_only = false;
     m_curr_buff_idx = 0;
+    TProfProfileThreadExitReason exit_reason = PROF_THREAD_EXIT_NONE;
 
 #if WRITE_SEND_DATA_TO_FILE == 1
     std::string file_path = std::string(SEND_DATA_FILE_DUMP_PATH) + to_string(m_thread_idx) + ".txt";
     FILE *fp = fopen(file_path.c_str(), "wb");
 #endif
-
+    TraceDqrProfiler::DQErr next_ins_ret = TraceDqrProfiler::DQERR_OK;
     // Send the packet
-    while (trace->NextInstruction(&instInfo, &nm, address_out) == TraceDqrProfiler::DQERR_OK)
+    while (true)
     {
         {
             std::lock_guard<std::mutex> m_abort_profiling_mutex_guard(m_abort_profiling_mutex);
             if (m_abort_profiling)
             {
+                exit_reason = PROF_THREAD_EXIT_ABORT;
                 LOG_ERR("Aborting Profiling");
                 break;
             }
         }
-        update_empty_file_ins_cnt = false;
+
+        next_ins_ret = trace->NextInstruction(&instInfo, &nm, address_out);
+        if (next_ins_ret != TraceDqrProfiler::DQERR_OK)
+        {
+            exit_reason = PROF_THREAD_EXIT_NEXT_INS;
+            break;
+        }
+
+        update_ins_cnt_for_empty_file_only = false;
         {
             // Check if flush trace data was called
             std::lock_guard<std::mutex> m_flush_data_offsets_guard(m_flush_data_offsets_mutex);
@@ -353,8 +363,7 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
         {
             // Update the instruction count to the file manager
             m_fp_cum_ins_cnt_callback(inst_cnt, false);
-            // Flag to mark that we have only updated the instruction count for non-empty file
-            update_empty_file_ins_cnt = true;
+            update_ins_cnt_for_empty_file_only = true;
             // Set the next expected flush offset
             flush_offset += m_ui_file_split_size_bytes;
             // Set the current instruction count to 0
@@ -367,6 +376,8 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
 #if TRANSFER_DATA_OVER_SOCKET == 1
                 if (SIFIVE_TRACE_PROFILER_OK != FlushDataOverSocket())
                 {
+                    exit_reason = PROF_THREAD_EXIT_SOCKET_ERR;
+                    LOG_ERR("Socket Error");
                     break;
                 }
 #endif
@@ -388,37 +399,40 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
             
     }
 
+    LOG_DEBUG("Exit Reason %d Current Buffer Idx %lu", exit_reason, m_curr_buff_idx);
+
+#if TRANSFER_DATA_OVER_SOCKET == 1
+    // Check if the loop exited due to socket error. In that case we do not
+    // have to check if there is any remaning data and try sending again.
+    // If not, then there could be remaining data in the buffer, send that to the
+    // UI.
+    if (exit_reason != PROF_THREAD_EXIT_SOCKET_ERR)
     {
         std::lock_guard<std::mutex> m_buffer_data_mutex_guard(m_buffer_data_mutex);
         if (m_curr_buff_idx > 0)
         {
-#if TRANSFER_DATA_OVER_SOCKET == 1
+            LOG_DEBUG("Flush Remaning Data");
             FlushDataOverSocket();
-
-            // Update the instruction count to the file manager
-            m_fp_cum_ins_cnt_callback(inst_cnt, false);
-            // Update the instruction count to the file manager again with
-            // second argument as flase to account for empty file
-            m_fp_cum_ins_cnt_callback(inst_cnt, true);
-            // Set intruction count to 0
-            inst_cnt = 0;
-#endif
         }
     }
-
-    // In some cases if the total trace data is an exact multiple of UI split file size and
-    // flush data or set end of data is called after profiling is complete, then the ins
-    // cnt for empty file won't be updated. Check the flag and update the cnt if that is the
-    // case. This is a rare scenario.
-    if(update_empty_file_ins_cnt)
+#endif
+    // If the current message offset is less than the flush data offset, this means
+    // that we need to update the ins cnt and also the cnt for the empty file. If
+    // the loop exited immediately after updating the ins cnt at an offset, then
+    // we only need to update the ins cnt for the empty file.
+    if (update_ins_cnt_for_empty_file_only == false)
     {
-        // In case the profiler has reached an exact multiple of UI split file size
-        // and the flush was called or end data was called we need to report the 
-        // instruction count for empty file
-        m_fp_cum_ins_cnt_callback(inst_cnt, true);
-        inst_cnt = 0;
+        // Update the instruction count to the file manager
+        LOG_DEBUG("Update Ins Cnt %llu", inst_cnt);
+        m_fp_cum_ins_cnt_callback(inst_cnt, false);
     }
-
+    LOG_DEBUG("Update Ins Cnt %llu", inst_cnt);
+    // Update the instruction count to the file manager again with
+    // second argument as flase to account for empty file
+    m_fp_cum_ins_cnt_callback(inst_cnt, true);
+    // Set intruction count to 0
+    inst_cnt = 0;
+        
 #if WRITE_SEND_DATA_TO_FILE == 1
     fclose(fp);
 #endif

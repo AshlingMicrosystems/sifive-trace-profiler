@@ -150,6 +150,15 @@ typedef enum
 	PROF_SEARCH_FORWARD = 1
 }TProfAddrSearchDir;
 
+// Structure to represent location of an address in the decoded trace data
+typedef enum
+{
+	PROF_THREAD_EXIT_NONE = 0,
+	PROF_THREAD_EXIT_ABORT = 1,
+	PROF_THREAD_EXIT_NEXT_INS = 2,
+	PROF_THREAD_EXIT_SOCKET_ERR = 3,
+}TProfProfileThreadExitReason;
+
 // Interface Class that provides access to the decoder related
 // functionality
 class SifiveProfilerInterface
