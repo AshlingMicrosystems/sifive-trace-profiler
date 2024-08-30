@@ -598,7 +598,7 @@ void SifiveProfilerInterface::SetCumUIFileInsCntCallback(std::function<void(uint
   Date         Initials    Description
 13-May-2022    AS          Initial
 ****************************************************************************/
-void SifiveProfilerInterface::AddFlushDataOffset(const uint64_t offset)
+void SifiveProfilerInterface::AddFlushDataOffset(const uint64_t offset, const bool flush_data_over_socket)
 {
     LOG_DEBUG("Adding Flush Data Offset %llu", offset);
     // Add the flush data offset to the vector
@@ -606,11 +606,13 @@ void SifiveProfilerInterface::AddFlushDataOffset(const uint64_t offset)
         std::lock_guard<std::mutex> m_flush_data_offsets_guard(m_flush_data_offsets_mutex);
         m_flush_data_offsets.push_back(offset);
     }
-
-    LOG_DEBUG("Flush data over socket");
+    if (flush_data_over_socket)
     {
-        std::lock_guard<std::mutex> m_buffer_data_mutex_guard(m_buffer_data_mutex);
-        FlushDataOverSocket();
+        LOG_DEBUG("Flush data over socket");
+        {
+            std::lock_guard<std::mutex> m_buffer_data_mutex_guard(m_buffer_data_mutex);
+            FlushDataOverSocket();
+        }
     }
 }
 
@@ -776,7 +778,7 @@ TySifiveTraceProfileError SifiveProfilerInterface::AddrSearchThread(const TProfA
             prev_addr = address_out;
 
             // If we have reached the stop idx, we can simply return
-            if (inst_cnt >= search_params.stop_ui_file_pos)
+            if (inst_cnt >= search_params.stop_ui_file_pos && (curr_ui_file_idx == search_params.stop_ui_file_idx - 1))
             {
                 return SIFIVE_TRACE_PROFILER_OK;
             }
@@ -817,6 +819,7 @@ TySifiveTraceProfileError SifiveProfilerInterface::AddrSearchThread(const TProfA
                     if ((curr_ui_file_idx < search_params.start_ui_file_idx) || (curr_ui_file_idx == search_params.start_ui_file_idx && inst_cnt <= search_params.start_ui_file_pos))
                     {
                         // Skip
+                        LOG_DEBUG("Skipping %llx, File Idx %llu, [%llu : %llu]", search_params.start_ui_file_idx, search_params.stop_ui_file_idx);
                     }
                     else
                     {

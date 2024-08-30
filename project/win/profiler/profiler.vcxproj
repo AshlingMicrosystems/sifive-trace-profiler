@@ -284,7 +284,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WINDOWS;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS;_LOGGING_ENABLED=1;_LOGGING_LEVEL=0</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WINDOWS;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS;_LOGGING_ENABLED=0;_LOGGING_LEVEL=0</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <Optimization>MaxSpeed</Optimization>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
