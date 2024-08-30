@@ -242,7 +242,7 @@ public:
 	virtual void WaitForAddrSearchCompletion();
     virtual void SetEndOfData();
     virtual void SetCumUIFileInsCntCallback(std::function<void(uint64_t cum_ins_cnt, bool is_empty_file_idx)> fp_callback);
-	virtual void AddFlushDataOffset(const uint64_t offset);
+	virtual void AddFlushDataOffset(const uint64_t offset, bool flush_data_over_socket = true);
 	virtual void AbortProfiling();
 	virtual TySifiveTraceProfileError StartAddrSearchThread(const TProfAddrSearchParams& search_params, const TProfAddrSearchDir& dir);
 	virtual TySifiveTraceProfileError AddrSearchThread(const TProfAddrSearchParams& search_params, const TProfAddrSearchDir& dir);
