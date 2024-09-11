@@ -12,6 +12,9 @@
 #include <cstring>
 #include <cstdint>
 #include <cassert>
+#include <unordered_map>
+#include <mutex>
+#include <functional>
 
 #define DQR_PROFILER_MAXCORES	16
 
@@ -530,8 +533,8 @@ public:
 			TraceDqrProfiler::ADDRESS ckdata[2];
 		} ictWS;
 	};
-
-	uint32_t offset;
+	uint32_t size_message = 0;
+	uint32_t offset = 0;
 	uint8_t  rawData[32];
 
 	int getI_Cnt();
@@ -818,6 +821,15 @@ public:
 	TraceDqrProfiler::DQErr getInstructionByAddress(TraceDqrProfiler::ADDRESS addr, ProfilerInstruction* instInfo, ProfilerSource* srcInfo, int* flags);
 
 	TraceDqrProfiler::DQErr getNumBytesInSWTQ(int& numBytes);
+	TraceDqrProfiler::DQErr GenerateHistogram();
+	void SetHistogramCallback(std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, bool& is_complete)> fp_callback)
+	{
+		m_fp_hist_callback = fp_callback;
+	}
+	void AddFlushDataOffset(const uint64_t offset)
+	{
+		m_flush_data_offset = offset;
+	}
 private:
 	enum state {
 		TRACE_STATE_SYNCCATE,
@@ -829,7 +841,9 @@ private:
 		TRACE_STATE_DONE,
 		TRACE_STATE_ERROR
 	};
-
+	std::atomic<uint64_t> m_flush_data_offset = 0xFFFFFFFFFFFFFFFF;
+	std::unordered_map<uint64_t, uint64_t> m_hist_map;
+	std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, bool& is_complete)> m_fp_hist_callback = nullptr;
 	TraceDqrProfiler::DQErr        status;
 	TraceDqrProfiler::TraceType	   traceType;
 	class SliceFileParser* sfp;
@@ -881,6 +895,7 @@ private:
 	class ProfilerCATrace* caTrace;
 	TraceDqrProfiler::TIMESTAMP lastCycle[DQR_PROFILER_MAXCORES];
 	int               eCycleCount[DQR_PROFILER_MAXCORES];
+	std::mutex m_hist_mutex;
 
 	TraceDqrProfiler::DQErr configure(class TraceSettings& settings);
 

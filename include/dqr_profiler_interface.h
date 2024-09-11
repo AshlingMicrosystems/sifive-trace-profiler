@@ -108,7 +108,7 @@ struct TProfilerConfig
 	bool enable_profiling_format = false;
 	uint32_t analytics_detail_log_level = TySifiveProfilerAnalyticsLogLevel::P_DISABLE;
 	TraceDqrProfiler::CATraceType cycle_accuracte_type = TraceDqrProfiler::CATRACE_NONE;
-	TraceDqrProfiler::TraceType trace_type = TraceDqrProfiler::TRACETYPE_BTM;
+	TraceDqrProfiler::TraceType trace_type = TraceDqrProfiler::TRACETYPE_HTM;
 	uint32_t numAddrBits = 0;
 	uint32_t addrDispFlags = 0;
 	uint32_t archSize = 0;
@@ -190,8 +190,8 @@ private:
 	TraceDqrProfiler::pathType pt = TraceDqrProfiler::PATH_TO_UNIX; // Display format for path info
 	int analytics_detail = TySifiveProfilerAnalyticsLogLevel::P_DISABLE;// Output ProfilerAnalytics
 	int msgLevel = TySifiveProfilerMsgLogLevel::P_LEVEL_1;			    // Nexus TraceProfiler Msg logging level
-    uint16_t m_port_no = 6000;                                          // Default port
-    uint64_t m_ui_file_split_size_bytes = 8 * 1024;                     // Default UI file size 8KB
+	uint16_t m_port_no = 6000;                                          // Default port
+	uint64_t m_ui_file_split_size_bytes = 8 * 1024;                     // Default UI file size 8KB
 
 	// ITC Print Settings
 	int itcPrintOpts = TraceDqrProfiler::ITC_OPT_NLS; // ITC Print Options
@@ -209,13 +209,16 @@ private:
 	int srcbits = 0;												// Size of ProfilerSource bit fields in bits (used for multicore tracing)
 	int archSize = TySifiveProfilerTargetArchSize::P_ARCH_GET_FROM_ELF;	// Target Architecture Size (32/64)
 
-	TraceProfiler* trace = nullptr;
-    SocketIntf *m_client = nullptr;
-    std::thread m_profiling_thread;
+	TraceProfiler* m_profiling_trace = nullptr;
+	TraceProfiler* m_addr_search_trace = nullptr;
+	TraceProfiler* m_hist_trace = nullptr;
+	SocketIntf* m_client = nullptr;
+	std::thread m_profiling_thread;
 	std::thread m_addr_search_thread;
-    uint64_t *mp_buffer = nullptr;
-    uint32_t m_thread_idx = 0;
-    std::function<void(uint64_t, bool)> m_fp_cum_ins_cnt_callback = nullptr;  // Funtion pointer to set callback
+	std::thread m_hist_thread;
+	uint64_t* mp_buffer = nullptr;
+	uint32_t m_thread_idx = 0;
+	std::function<void(uint64_t, bool)> m_fp_cum_ins_cnt_callback = nullptr;  // Funtion pointer to set callback
 
 	std::mutex m_flush_data_offsets_mutex;                                    // Mutex for synchronization
 	std::mutex m_buffer_data_mutex;											  // Mutex for synchronization
@@ -229,24 +232,33 @@ private:
 
 	TProfAddrSearchOut m_addr_search_out;
 
-    virtual TySifiveTraceProfileError ProfilingThread();
-    virtual void CleanUp();
-    virtual bool WaitforACK();
+	virtual TySifiveTraceProfileError ProfilingThread();
+	virtual void CleanUpProfiling();
+	virtual void CleanUpAddrSearch();
+	virtual void CleanUpHistogram();
+	virtual bool WaitforACK();
 	virtual TySifiveTraceProfileError FlushDataOverSocket();
 public:
 	virtual TySifiveTraceProfileError Configure(const TProfilerConfig& config);
-	virtual ~SifiveProfilerInterface() { CleanUp(); }
-    virtual TySifiveTraceProfileError StartProfilingThread(uint32_t thread_idx);
-    virtual TySifiveTraceProfileError PushTraceData(uint8_t *p_buff, const uint64_t &size);
-    virtual void WaitForProfilerCompletion();
+	virtual ~SifiveProfilerInterface();
+	virtual TySifiveTraceProfileError StartProfilingThread(uint32_t thread_idx);
+	virtual TySifiveTraceProfileError PushTraceData(uint8_t* p_buff, const uint64_t& size);
+	virtual void WaitForProfilerCompletion();
 	virtual void WaitForAddrSearchCompletion();
-    virtual void SetEndOfData();
-    virtual void SetCumUIFileInsCntCallback(std::function<void(uint64_t cum_ins_cnt, bool is_empty_file_idx)> fp_callback);
+	virtual void SetEndOfData();
+	virtual void SetCumUIFileInsCntCallback(std::function<void(uint64_t cum_ins_cnt, bool is_empty_file_idx)> fp_callback);
 	virtual void AddFlushDataOffset(const uint64_t offset, bool flush_data_over_socket = true);
 	virtual void AbortProfiling();
 	virtual TySifiveTraceProfileError StartAddrSearchThread(const TProfAddrSearchParams& search_params, const TProfAddrSearchDir& dir);
 	virtual TySifiveTraceProfileError AddrSearchThread(const TProfAddrSearchParams& search_params, const TProfAddrSearchDir& dir);
 	virtual bool IsSearchAddressFound(TProfAddrSearchOut& addr_out);
+
+	virtual TySifiveTraceProfileError StartHistogramThread();
+	virtual TySifiveTraceProfileError HistogramThread();
+	virtual void WaitForHistogramCompletion();
+	virtual TySifiveTraceProfileError PushTraceDataToHistGenerator(uint8_t* p_buff, const uint64_t& size);
+	virtual void SetEndOfDataHistGenerator();
+	virtual void SetHistogramCallback(std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, bool& is_complete)> fp_callback);
 };
 
 // Function pointer typedef

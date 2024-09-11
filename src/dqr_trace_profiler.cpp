@@ -7452,3 +7452,343 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 	status = TraceDqrProfiler::DQERR_OK;
 	return TraceDqrProfiler::DQERR_OK;
 }
+
+TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
+{
+	if (status != TraceDqrProfiler::DQERR_OK)
+	{
+		return status;
+	}
+
+	TraceDqrProfiler::DQErr rc;
+	TraceDqrProfiler::ADDRESS addr;
+	int crFlag;
+	TraceDqrProfiler::BranchFlags brFlags;
+	bool consumed = false;
+	uint64_t prev_address = 0;
+	const uint64_t update_offset = 4 * 1024 * 1024;
+	uint64_t next_offset = update_offset;
+	bool complete = false;
+	for (;;)
+	{
+		bool haveMsg;
+		if (readNewTraceMessage != false)
+		{
+			do
+			{
+				//if (nm.offset > next_offset)
+				{
+					if (m_fp_hist_callback)
+						m_fp_hist_callback(m_hist_map, complete);
+					//next_offset += update_offset;
+				}
+				//if ((nm.offset + nm.size_message) >= m_flush_data_offset)
+				//{
+				//	complete = true;
+				//	m_flush_data_offset = 0xFFFFFFFFFFFFFFFF;
+				//	if (m_fp_hist_callback)
+				//		m_fp_hist_callback(m_hist_map, complete);
+				//}
+				rc = sfp->readNextTraceMsg(nm, analytics, haveMsg);
+				if (rc != TraceDqrProfiler::DQERR_OK)
+				{
+					// have an error. either EOF, or error
+					status = rc;
+					
+					if (status == TraceDqrProfiler::DQERR_EOF) {
+						state[currentCore] = TRACE_STATE_DONE;
+					}
+					else {
+						printf("Error: TraceProfiler file does not contain any trace messages, or is unreadable\n");
+						state[currentCore] = TRACE_STATE_ERROR;
+					}
+
+
+					complete = true;
+					m_flush_data_offset = 0xFFFFFFFFFFFFFFFF;
+					if (m_fp_hist_callback)
+						m_fp_hist_callback(m_hist_map, complete);
+					return status;
+				}
+				complete = false;
+				if (haveMsg == false)
+				{
+					lastTime[currentCore] = 0;
+					currentAddress[currentCore] = 0;
+					lastFaddr[currentCore] = 0;
+
+					state[currentCore] = TRACE_STATE_GETFIRSTSYNCMSG;
+				}
+			} while (haveMsg == false);
+
+			readNewTraceMessage = false;
+			currentCore = nm.coreId;
+		}
+
+		switch (state[currentCore])
+		{
+		case TRACE_STATE_GETFIRSTSYNCMSG:
+			switch (nm.tcode) {
+			case TraceDqrProfiler::TCODE_SYNC:
+			case TraceDqrProfiler::TCODE_DIRECT_BRANCH_WS:
+			case TraceDqrProfiler::TCODE_INDIRECT_BRANCH_WS:
+			case TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY_WS:
+			case TraceDqrProfiler::TCODE_DATA_ACQUISITION:
+				rc = processTraceMessage(nm, currentAddress[currentCore], lastFaddr[currentCore], lastTime[currentCore], consumed);
+				if (rc != TraceDqrProfiler::DQERR_OK) {
+					status = TraceDqrProfiler::DQERR_ERR;
+					state[currentCore] = TRACE_STATE_ERROR;
+					return status;
+				}
+				state[currentCore] = TRACE_STATE_GETMSGWITHCOUNT;
+				continue;
+			case TraceDqrProfiler::TCODE_INCIRCUITTRACE:
+			case TraceDqrProfiler::TCODE_OWNERSHIP_TRACE:
+			case TraceDqrProfiler::TCODE_DIRECT_BRANCH:
+			case TraceDqrProfiler::TCODE_INDIRECT_BRANCH:
+			case TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY:
+			case TraceDqrProfiler::TCODE_RESOURCEFULL:
+			case TraceDqrProfiler::TCODE_CORRELATION:
+			case TraceDqrProfiler::TCODE_ERROR:
+				break;
+			case TraceDqrProfiler::TCODE_DEBUG_STATUS:
+			case TraceDqrProfiler::TCODE_DEVICE_ID:
+			case TraceDqrProfiler::TCODE_DATA_WRITE:
+			case TraceDqrProfiler::TCODE_DATA_READ:
+			case TraceDqrProfiler::TCODE_CORRECTION:
+			case TraceDqrProfiler::TCODE_DATA_WRITE_WS:
+			case TraceDqrProfiler::TCODE_DATA_READ_WS:
+			case TraceDqrProfiler::TCODE_WATCHPOINT:
+			default:
+				state[currentCore] = TRACE_STATE_ERROR;
+				status = TraceDqrProfiler::DQERR_ERR;
+				return status;
+			}
+			readNewTraceMessage = true;
+			status = TraceDqrProfiler::DQERR_OK;
+			continue;
+		case TRACE_STATE_GETMSGWITHCOUNT:
+			switch (nm.tcode) {
+			case TraceDqrProfiler::TCODE_SYNC:
+			case TraceDqrProfiler::TCODE_DIRECT_BRANCH_WS:
+			case TraceDqrProfiler::TCODE_INDIRECT_BRANCH_WS:
+			case TraceDqrProfiler::TCODE_DIRECT_BRANCH:
+			case TraceDqrProfiler::TCODE_INDIRECT_BRANCH:
+			case TraceDqrProfiler::TCODE_CORRELATION:
+			case TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY:
+			case TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY_WS:
+			case TraceDqrProfiler::TCODE_RESOURCEFULL:
+				counts->resetCounts(currentCore);
+				rc = counts->setCounts(&nm);
+				if (rc != TraceDqrProfiler::DQERR_OK) {
+					state[currentCore] = TRACE_STATE_ERROR;
+					status = rc;
+					return status;
+				}
+				state[currentCore] = TRACE_STATE_GETNEXTINSTRUCTION;
+				continue;
+			case TraceDqrProfiler::TCODE_ERROR:
+				state[currentCore] = TRACE_STATE_GETFIRSTSYNCMSG;
+
+				nm.timestamp = 0;	// clear time because we have lost time
+				lastTime[currentCore] = 0;
+				currentAddress[currentCore] = 0;
+				lastFaddr[currentCore] = 0;
+
+				readNewTraceMessage = true;
+
+				continue;
+			case TraceDqrProfiler::TCODE_DATA_ACQUISITION:
+				rc = processTraceMessage(nm, currentAddress[currentCore], lastFaddr[currentCore], lastTime[currentCore], consumed);
+				if (rc != TraceDqrProfiler::DQERR_OK) {
+					printf("Error: NextInstruction(): state TRACE_STATE_GETMSGWITHCOUNT: processTraceMessage()\n");
+
+					status = TraceDqrProfiler::DQERR_ERR;
+					state[currentCore] = TRACE_STATE_ERROR;
+
+					return status;
+				}
+				readNewTraceMessage = true;
+				continue;
+			case TraceDqrProfiler::TCODE_AUXACCESS_WRITE:
+			case TraceDqrProfiler::TCODE_OWNERSHIP_TRACE:
+				readNewTraceMessage = true;
+				continue;
+			default:
+				printf("Error: bad tcode type in state TRACE_STATE_GETMSGWITHCOUNT. TCODE (%d)\n", nm.tcode);
+
+				state[currentCore] = TRACE_STATE_ERROR;
+				status = TraceDqrProfiler::DQERR_ERR;
+
+				return status;
+			}
+			break;
+		case TRACE_STATE_RETIREMESSAGE:
+			switch (nm.tcode) {
+				// sync type messages say where to set pc to
+			case TraceDqrProfiler::TCODE_SYNC:
+			case TraceDqrProfiler::TCODE_DIRECT_BRANCH_WS:
+			case TraceDqrProfiler::TCODE_INDIRECT_BRANCH_WS:
+			case TraceDqrProfiler::TCODE_DIRECT_BRANCH:
+			case TraceDqrProfiler::TCODE_INDIRECT_BRANCH:
+			case TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY:
+			case TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY_WS:
+			case TraceDqrProfiler::TCODE_RESOURCEFULL:
+				rc = processTraceMessage(nm, currentAddress[currentCore], lastFaddr[currentCore], lastTime[currentCore], consumed);
+				if (rc != TraceDqrProfiler::DQERR_OK) {
+					printf("Error: NextInstruction(): state TRACE_STATE_RETIREMESSAGE: processTraceMessage()\n");
+					status = TraceDqrProfiler::DQERR_ERR;
+					state[currentCore] = TRACE_STATE_ERROR;
+					return status;
+				}
+				readNewTraceMessage = true;
+				state[currentCore] = TRACE_STATE_GETNEXTMSG;
+				continue;
+			case TraceDqrProfiler::TCODE_CORRELATION:
+				readNewTraceMessage = true;
+				state[currentCore] = TRACE_STATE_GETFIRSTSYNCMSG;
+				continue;
+			case TraceDqrProfiler::TCODE_ERROR:
+			case TraceDqrProfiler::TCODE_AUXACCESS_WRITE:
+			case TraceDqrProfiler::TCODE_OWNERSHIP_TRACE:
+			case TraceDqrProfiler::TCODE_INCIRCUITTRACE:
+			case TraceDqrProfiler::TCODE_INCIRCUITTRACE_WS:
+			default:
+				printf("Error: bad tcode type in state TRACE_STATE_RETIREMESSAGE\n");
+				state[currentCore] = TRACE_STATE_ERROR;
+				status = TraceDqrProfiler::DQERR_ERR;
+				return status;
+			}
+
+			status = TraceDqrProfiler::DQERR_OK;
+			continue;
+		case TRACE_STATE_GETNEXTMSG:
+			switch (nm.tcode) {
+			case TraceDqrProfiler::TCODE_DIRECT_BRANCH:
+			case TraceDqrProfiler::TCODE_INDIRECT_BRANCH:
+			case TraceDqrProfiler::TCODE_SYNC:
+			case TraceDqrProfiler::TCODE_DIRECT_BRANCH_WS:
+			case TraceDqrProfiler::TCODE_INDIRECT_BRANCH_WS:
+			case TraceDqrProfiler::TCODE_CORRELATION:
+			case TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY:
+			case TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY_WS:
+			case TraceDqrProfiler::TCODE_RESOURCEFULL:
+				rc = counts->setCounts(&nm);
+				if (rc != TraceDqrProfiler::DQERR_OK) {
+					printf("Error: nextInstruction: state TRACE_STATE_GETNEXTMESSAGE Count::seteCounts()\n");
+					state[currentCore] = TRACE_STATE_ERROR;
+					status = rc;
+					return status;
+				}
+				state[currentCore] = TRACE_STATE_GETNEXTINSTRUCTION;
+				continue;
+			case TraceDqrProfiler::TCODE_ERROR:
+				state[currentCore] = TRACE_STATE_GETFIRSTSYNCMSG;
+
+				nm.timestamp = 0;	// clear time because we have lost time
+				currentAddress[currentCore] = 0;
+				lastFaddr[currentCore] = 0;
+				lastTime[currentCore] = 0;
+
+				readNewTraceMessage = true;
+				continue;
+			case TraceDqrProfiler::TCODE_AUXACCESS_WRITE:
+			case TraceDqrProfiler::TCODE_DATA_ACQUISITION:
+				rc = processTraceMessage(nm, currentAddress[currentCore], lastFaddr[currentCore], lastTime[currentCore], consumed);
+				if (rc != TraceDqrProfiler::DQERR_OK) {
+					status = TraceDqrProfiler::DQERR_ERR;
+					state[currentCore] = TRACE_STATE_ERROR;
+					return status;
+				}
+				readNewTraceMessage = true;
+				return status;
+			case TraceDqrProfiler::TCODE_OWNERSHIP_TRACE:
+				readNewTraceMessage = true;
+				continue;
+			default:
+				state[currentCore] = TRACE_STATE_ERROR;
+				status = TraceDqrProfiler::DQERR_ERR;
+				return status;
+			}
+			break;
+		case TRACE_STATE_GETNEXTINSTRUCTION:
+			if (counts->getCurrentCountType(currentCore) == TraceDqrProfiler::COUNTTYPE_none)
+			{
+				if (profiler_globalDebugFlag)
+				{
+					printf("NextInstruction(): counts are exhausted\n");
+				}
+				state[currentCore] = TRACE_STATE_RETIREMESSAGE;
+				continue;
+			}
+			while (1)
+			{
+				addr = currentAddress[currentCore];
+				uint64_t address_out = (addr);
+
+				if (prev_address != address_out)
+				{
+					m_hist_map[address_out] += 1;
+				}
+				prev_address = address_out;
+
+				uint32_t inst;
+				int inst_size;
+				TraceDqrProfiler::InstType inst_type;
+				int32_t immediate;
+				bool isBranch;
+				int rc;
+				TraceDqrProfiler::Reg rs1;
+				TraceDqrProfiler::Reg rd;
+
+				status = nextAddr(currentCore, currentAddress[currentCore], addr, nm.tcode, crFlag, brFlags);
+				if (status != TraceDqrProfiler::DQERR_OK)
+				{
+					state[currentCore] = TRACE_STATE_ERROR;
+					return status;
+				}
+
+				if (addr == (TraceDqrProfiler::ADDRESS)-1)
+				{
+					if (brFlags == TraceDqrProfiler::BRFLAG_unknown)
+					{
+						state[currentCore] = TRACE_STATE_RETIREMESSAGE;
+						break;
+					}
+					else if (counts->getCurrentCountType(currentCore) != TraceDqrProfiler::COUNTTYPE_none)
+					{
+						state[currentCore] = TRACE_STATE_GETFIRSTSYNCMSG;
+						status = TraceDqrProfiler::DQERR_OK;
+						break;
+					}
+				}
+
+
+				currentAddress[currentCore] = addr;
+
+				if (counts->getCurrentCountType(currentCore) == TraceDqrProfiler::COUNTTYPE_none)
+				{
+					// still have valid counts. Keep running nextInstruction!
+					break;
+				}
+
+				//state[currentCore] = TRACE_STATE_RETIREMESSAGE;
+				//break;
+			}
+			break;
+		case TRACE_STATE_DONE:
+			status = TraceDqrProfiler::DQERR_DONE;
+			return status;
+		case TRACE_STATE_ERROR:
+			status = TraceDqrProfiler::DQERR_ERR;
+			return status;
+		default:
+			state[currentCore] = TRACE_STATE_ERROR;
+			status = TraceDqrProfiler::DQERR_ERR;
+			return status;
+		}
+	}
+
+	status = TraceDqrProfiler::DQERR_OK;
+	return TraceDqrProfiler::DQERR_OK;
+}

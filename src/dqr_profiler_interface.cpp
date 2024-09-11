@@ -85,24 +85,24 @@ TySifiveTraceProfileError SifiveProfilerInterface::StartProfilingThread(uint32_t
         m_abort_profiling = false;
     }
 
-    trace = new (std::nothrow) TraceProfiler(tf_name, ef_name, numAddrBits, addrDispFlags, srcbits, od_name, freq);
-    if (trace == nullptr)
+    m_profiling_trace = new (std::nothrow) TraceProfiler(tf_name, ef_name, numAddrBits, addrDispFlags, srcbits, od_name, freq);
+    if (m_profiling_trace == nullptr)
     {
         LOG_ERR("Could not create Trace Profiler instance");
-        CleanUp();
+        CleanUpProfiling();
         return SIFIVE_TRACE_PROFILER_MEM_CREATE_ERR;
     }
 
-    if (trace->getStatus() != TraceDqrProfiler::DQERR_OK)
+    if (m_profiling_trace->getStatus() != TraceDqrProfiler::DQERR_OK)
     {
         LOG_ERR("Trace Profiler Status Error");
-        CleanUp();
+        CleanUpProfiling();
         return SIFIVE_TRACE_PROFILER_TRACE_STATUS_ERROR;
     }
 
-    trace->setTraceType(traceType);
-    trace->setTSSize(tssize);
-    trace->setPathType(pt);
+    m_profiling_trace->setTraceType(traceType);
+    m_profiling_trace->setTSSize(tssize);
+    m_profiling_trace->setPathType(pt);
 
     m_thread_idx = thread_idx;
 
@@ -139,7 +139,7 @@ TySifiveTraceProfileError SifiveProfilerInterface::StartProfilingThread(uint32_t
     if (mp_buffer == nullptr)
     {
         LOG_ERR("Unable to Create Socket Buffer");
-        CleanUp();
+        CleanUpProfiling();
         return SIFIVE_TRACE_PROFILER_MEM_CREATE_ERR;
     }
 
@@ -171,11 +171,21 @@ TySifiveTraceProfileError SifiveProfilerInterface::StartProfilingThread(uint32_t
 ****************************************************************************/
 void SifiveProfilerInterface::SetEndOfData()
 {
-    if (trace == NULL)
-        return;
-    trace->SetEndOfData();
+    if (m_profiling_trace != NULL)
+        m_profiling_trace->SetEndOfData();
 }
 
+void SifiveProfilerInterface::SetEndOfDataHistGenerator()
+{
+    if (m_hist_trace != NULL)
+        m_hist_trace->SetEndOfData();
+}
+
+void SifiveProfilerInterface::SetHistogramCallback(std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, bool &is_complete)> fp_callback)
+{
+    if (m_hist_trace != NULL)
+        m_hist_trace->SetHistogramCallback(fp_callback);
+}
 /****************************************************************************
      Function: PushTraceData
      Engineer: Arjun Suresh
@@ -189,10 +199,29 @@ void SifiveProfilerInterface::SetEndOfData()
 ****************************************************************************/
 TySifiveTraceProfileError SifiveProfilerInterface::PushTraceData(uint8_t *p_buff, const uint64_t& size)
 {
-    if (trace == NULL)
+    if (m_profiling_trace == NULL)
         return SIFIVE_TRACE_PROFILER_MEM_CREATE_ERR;
-    return (trace->PushTraceData(p_buff, size) == TraceDqrProfiler::DQERR_OK) ? SIFIVE_TRACE_PROFILER_OK : SIFIVE_TRACE_PROFILER_ERR;
+    return (m_profiling_trace->PushTraceData(p_buff, size) == TraceDqrProfiler::DQERR_OK) ? SIFIVE_TRACE_PROFILER_OK : SIFIVE_TRACE_PROFILER_ERR;
 }
+
+/****************************************************************************
+     Function: PushTraceData
+     Engineer: Arjun Suresh
+        Input: p_buff - Pointer to buffer that contains the trace data
+               size - Size in bytes of the trace data
+       Output: None
+       return: TySifiveTraceProfileError
+  Description: Pushes the trace data for processing
+  Date         Initials    Description
+  26-Apr-2024  AS          Initial
+****************************************************************************/
+TySifiveTraceProfileError SifiveProfilerInterface::PushTraceDataToHistGenerator(uint8_t* p_buff, const uint64_t& size)
+{
+    if (m_hist_trace == NULL)
+        return SIFIVE_TRACE_PROFILER_MEM_CREATE_ERR;
+    return (m_hist_trace->PushTraceData(p_buff, size) == TraceDqrProfiler::DQERR_OK) ? SIFIVE_TRACE_PROFILER_OK : SIFIVE_TRACE_PROFILER_ERR;
+}
+
 
 /****************************************************************************
      Function: WaitForProfilerCompletion
@@ -212,7 +241,7 @@ void SifiveProfilerInterface::WaitForProfilerCompletion()
     if (m_profiling_thread.joinable())
         m_profiling_thread.join();
 
-    CleanUp();
+    CleanUpProfiling();
     LOG_DEBUG("Cleanup Complete");
 }
 
@@ -312,7 +341,7 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
             }
         }
 
-        next_ins_ret = trace->NextInstruction(&instInfo, &nm, address_out);
+        next_ins_ret = m_profiling_trace->NextInstruction(&instInfo, &nm, address_out);
         if (next_ins_ret != TraceDqrProfiler::DQERR_OK)
         {
             exit_reason = PROF_THREAD_EXIT_NEXT_INS;
@@ -500,7 +529,7 @@ bool SifiveProfilerInterface::WaitforACK()
   Date         Initials    Description
 2-Nov-2022     AS          Initial
 ****************************************************************************/
-void SifiveProfilerInterface::CleanUp()
+void SifiveProfilerInterface::CleanUpProfiling()
 {
 #if TRANSFER_DATA_OVER_SOCKET == 1
     LOG_DEBUG("Closing socket");
@@ -519,12 +548,32 @@ void SifiveProfilerInterface::CleanUp()
     }
 
     LOG_DEBUG("Trace Class Clenup");
-	if (trace != nullptr) {
+	if (m_profiling_trace != nullptr) {
         
-		trace->cleanUp();
-		delete trace;
-		trace = nullptr;
+        m_profiling_trace->cleanUp();
+		delete m_profiling_trace;
+        m_profiling_trace = nullptr;
 	}
+}
+
+void SifiveProfilerInterface::CleanUpAddrSearch()
+{
+    if (m_addr_search_trace != nullptr) {
+
+        m_addr_search_trace->cleanUp();
+        delete m_addr_search_trace;
+        m_addr_search_trace = nullptr;
+    }
+}
+
+void SifiveProfilerInterface::CleanUpHistogram()
+{
+    if (m_hist_trace != nullptr) {
+
+        m_hist_trace->cleanUp();
+        delete m_hist_trace;
+        m_hist_trace = nullptr;
+    }
 }
 
 /****************************************************************************
@@ -605,6 +654,8 @@ void SifiveProfilerInterface::AddFlushDataOffset(const uint64_t offset, const bo
     {
         std::lock_guard<std::mutex> m_flush_data_offsets_guard(m_flush_data_offsets_mutex);
         m_flush_data_offsets.push_back(offset);
+        if(m_hist_trace)
+            m_hist_trace->AddFlushDataOffset(offset);
     }
     if (flush_data_over_socket)
     {
@@ -687,24 +738,24 @@ void DeleteSifiveProfilerInterface(SifiveProfilerInterface** p_sifive_profiler_i
 ****************************************************************************/
 TySifiveTraceProfileError SifiveProfilerInterface::StartAddrSearchThread(const TProfAddrSearchParams& search_params, const TProfAddrSearchDir& dir)
 {
-    trace = new (std::nothrow) TraceProfiler(tf_name, ef_name, numAddrBits, addrDispFlags, srcbits, od_name, freq);
-    if (trace == nullptr)
+    m_addr_search_trace = new (std::nothrow) TraceProfiler(tf_name, ef_name, numAddrBits, addrDispFlags, srcbits, od_name, freq);
+    if (m_addr_search_trace == nullptr)
     {
         printf("Error: Could not create TraceProfiler object\n");
-        CleanUp();
+        CleanUpAddrSearch();
         return SIFIVE_TRACE_PROFILER_MEM_CREATE_ERR;
     }
 
-    if (trace->getStatus() != TraceDqrProfiler::DQERR_OK)
+    if (m_addr_search_trace->getStatus() != TraceDqrProfiler::DQERR_OK)
     {
         printf("Error: new TraceProfiler(%s,%s) failed\n", tf_name, ef_name);
-        CleanUp();
+        CleanUpAddrSearch();
         return SIFIVE_TRACE_PROFILER_TRACE_STATUS_ERROR;
     }
 
-    trace->setTraceType(traceType);
-    trace->setTSSize(tssize);
-    trace->setPathType(pt);
+    m_addr_search_trace->setTraceType(traceType);
+    m_addr_search_trace->setTSSize(tssize);
+    m_addr_search_trace->setPathType(pt);
 
     try
     {
@@ -745,7 +796,7 @@ TySifiveTraceProfileError SifiveProfilerInterface::AddrSearchThread(const TProfA
     uint64_t curr_ui_file_idx = ((search_params.start_ui_file_idx <= 1) ? search_params.start_ui_file_idx : (search_params.start_ui_file_idx - 1));
 
     // Loop through the decoded instructions
-    while (trace->NextInstruction(&instInfo, &nm, address_out) == TraceDqrProfiler::DQERR_OK)
+    while (m_addr_search_trace->NextInstruction(&instInfo, &nm, address_out) == TraceDqrProfiler::DQERR_OK)
     {
         // If the curr index exceeds the stop idx, we can return
         if (curr_ui_file_idx >= search_params.stop_ui_file_idx)
@@ -875,5 +926,60 @@ void SifiveProfilerInterface::WaitForAddrSearchCompletion()
 {
     if (m_addr_search_thread.joinable())
         m_addr_search_thread.join();
-    CleanUp();
+    CleanUpAddrSearch();
+}
+
+TySifiveTraceProfileError SifiveProfilerInterface::StartHistogramThread()
+{
+    m_hist_trace = new (std::nothrow) TraceProfiler(tf_name, ef_name, numAddrBits, addrDispFlags, srcbits, od_name, freq);
+    if (m_hist_trace == nullptr)
+    {
+        LOG_ERR("Could not create Trace Profiler instance");
+        CleanUpHistogram();
+        return SIFIVE_TRACE_PROFILER_MEM_CREATE_ERR;
+    }
+
+    if (m_hist_trace->getStatus() != TraceDqrProfiler::DQERR_OK)
+    {
+        LOG_ERR("Trace Profiler Status Error");
+        CleanUpHistogram();
+        return SIFIVE_TRACE_PROFILER_TRACE_STATUS_ERROR;
+    }
+
+    m_hist_trace->setTraceType(traceType);
+    m_hist_trace->setTSSize(tssize);
+    m_hist_trace->setPathType(pt);
+
+    try
+    {
+        m_hist_thread = std::thread(&SifiveProfilerInterface::HistogramThread, this);
+    }
+    catch (...)
+    {
+        LOG_ERR("Error in creating Profiling Thread [%u]", m_thread_idx);
+        return SIFIVE_TRACE_PROFILER_ERR;
+    }
+
+    return SIFIVE_TRACE_PROFILER_OK;
+}
+
+TySifiveTraceProfileError SifiveProfilerInterface::HistogramThread()
+{
+    TraceDqrProfiler::DQErr next_ins_ret;
+    m_hist_trace->GenerateHistogram();
+    return SIFIVE_TRACE_PROFILER_OK;
+}
+
+void SifiveProfilerInterface::WaitForHistogramCompletion()
+{
+    if (m_hist_thread.joinable())
+        m_hist_thread.join();
+    CleanUpHistogram();
+}
+
+SifiveProfilerInterface::~SifiveProfilerInterface()
+{
+    CleanUpProfiling();
+    CleanUpAddrSearch();
+    CleanUpHistogram();
 }
