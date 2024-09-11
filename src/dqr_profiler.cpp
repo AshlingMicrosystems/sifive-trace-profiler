@@ -11358,14 +11358,13 @@ TraceDqrProfiler::DQErr SliceFileParser::readNextTraceMsg(ProfilerNexusMessage& 
 	nm.offset = msgOffset;
 
 	int i = 0;
-	FILE* fp = fopen("trace_bin.rtd", "ab");
+
 	do {
-		fwrite(&msg[i], sizeof(msg[i]), 1, fp);
 		nm.rawData[i] = msg[i];
 		i += 1;
 	} while (((size_t)i < sizeof nm.rawData / sizeof nm.rawData[0]) && ((msg[i - 1] & 0x03) != TraceDqrProfiler::MSEO_END));
 	nm.size_message = i;
-	fclose(fp);
+
 	rc = parseFixedField(6, &val);
 	if (rc == TraceDqrProfiler::DQERR_OK) {
 		tcode = (uint8_t)val;

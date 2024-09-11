@@ -7466,9 +7466,10 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 	TraceDqrProfiler::BranchFlags brFlags;
 	bool consumed = false;
 	uint64_t prev_address = 0;
-	const uint64_t update_offset = 4 * 1024 * 1024;
+	const uint64_t update_offset = 1000000;
 	uint64_t next_offset = update_offset;
 	bool complete = false;
+	uint64_t n_ins_cnt = 0;
 	for (;;)
 	{
 		bool haveMsg;
@@ -7476,19 +7477,17 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 		{
 			do
 			{
-				//if (nm.offset > next_offset)
+				if (n_ins_cnt > next_offset)
 				{
 					if (m_fp_hist_callback)
-						m_fp_hist_callback(m_hist_map, complete);
-					//next_offset += update_offset;
+						m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt);
+					next_offset += update_offset;
 				}
-				//if ((nm.offset + nm.size_message) >= m_flush_data_offset)
-				//{
-				//	complete = true;
-				//	m_flush_data_offset = 0xFFFFFFFFFFFFFFFF;
-				//	if (m_fp_hist_callback)
-				//		m_fp_hist_callback(m_hist_map, complete);
-				//}
+				if ((nm.offset + nm.size_message) >= m_flush_data_offset)
+				{
+					if (m_fp_hist_callback)
+						m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt);
+				}
 				rc = sfp->readNextTraceMsg(nm, analytics, haveMsg);
 				if (rc != TraceDqrProfiler::DQERR_OK)
 				{
@@ -7507,7 +7506,7 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 					complete = true;
 					m_flush_data_offset = 0xFFFFFFFFFFFFFFFF;
 					if (m_fp_hist_callback)
-						m_fp_hist_callback(m_hist_map, complete);
+						m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt);
 					return status;
 				}
 				complete = false;
@@ -7729,6 +7728,7 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 				if (prev_address != address_out)
 				{
 					m_hist_map[address_out] += 1;
+					n_ins_cnt++;
 				}
 				prev_address = address_out;
 

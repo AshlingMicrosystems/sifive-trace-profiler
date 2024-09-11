@@ -181,7 +181,7 @@ void SifiveProfilerInterface::SetEndOfDataHistGenerator()
         m_hist_trace->SetEndOfData();
 }
 
-void SifiveProfilerInterface::SetHistogramCallback(std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, bool &is_complete)> fp_callback)
+void SifiveProfilerInterface::SetHistogramCallback(std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins)> fp_callback)
 {
     if (m_hist_trace != NULL)
         m_hist_trace->SetHistogramCallback(fp_callback);
