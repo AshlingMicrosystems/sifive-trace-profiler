@@ -259,6 +259,7 @@ public:
 	virtual TySifiveTraceProfileError PushTraceDataToHistGenerator(uint8_t* p_buff, const uint64_t& size);
 	virtual void SetEndOfDataHistGenerator();
 	virtual void SetHistogramCallback(std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins)> fp_callback);
+	virtual void ClearHistogram();
 };
 
 // Function pointer typedef

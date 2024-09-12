@@ -186,6 +186,11 @@ void SifiveProfilerInterface::SetHistogramCallback(std::function<void(std::unord
     if (m_hist_trace != NULL)
         m_hist_trace->SetHistogramCallback(fp_callback);
 }
+void SifiveProfilerInterface::ClearHistogram()
+{
+    if (m_hist_trace != NULL)
+        m_hist_trace->ClearHistogram();
+}
 /****************************************************************************
      Function: PushTraceData
      Engineer: Arjun Suresh

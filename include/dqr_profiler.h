@@ -830,6 +830,10 @@ public:
 	{
 		m_flush_data_offset = offset;
 	}
+	void ClearHistogram()
+	{
+		m_hist_map.clear();
+	}
 private:
 	enum state {
 		TRACE_STATE_SYNCCATE,
