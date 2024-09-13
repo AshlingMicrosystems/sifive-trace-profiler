@@ -2473,6 +2473,7 @@ TraceProfiler::TraceProfiler(char* tf_name, char* ef_name, int numAddrBits, uint
 	eventConverter = nullptr;
 	perfConverter = nullptr;
 	objdump = nullptr;
+	m_flush_data_offset = UINT64_MAX;
 
 	ts.propertyToTFName(tf_name);
 	ts.propertyToEFName(ef_name);

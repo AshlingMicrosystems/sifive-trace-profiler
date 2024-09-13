@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <mutex>
 #include <functional>
+#include <atomic>
 
 #define DQR_PROFILER_MAXCORES	16
 
@@ -845,7 +846,7 @@ private:
 		TRACE_STATE_DONE,
 		TRACE_STATE_ERROR
 	};
-	std::atomic<uint64_t> m_flush_data_offset = 0xFFFFFFFFFFFFFFFF;
+	std::atomic<uint64_t> m_flush_data_offset;
 	std::unordered_map<uint64_t, uint64_t> m_hist_map;
 	std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins)> m_fp_hist_callback = nullptr;
 	TraceDqrProfiler::DQErr        status;
