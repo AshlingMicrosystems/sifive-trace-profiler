@@ -11363,6 +11363,7 @@ TraceDqrProfiler::DQErr SliceFileParser::readNextTraceMsg(ProfilerNexusMessage& 
 		nm.rawData[i] = msg[i];
 		i += 1;
 	} while (((size_t)i < sizeof nm.rawData / sizeof nm.rawData[0]) && ((msg[i - 1] & 0x03) != TraceDqrProfiler::MSEO_END));
+	nm.size_message = i;
 
 	rc = parseFixedField(6, &val);
 	if (rc == TraceDqrProfiler::DQERR_OK) {
