@@ -11,6 +11,7 @@
 #include <fstream>
 #include <cstring>
 #include <cstdint>
+#include <stdint.h>
 #include <thread>
 #include <deque>
 #include <functional>
@@ -232,6 +233,9 @@ private:
 
 	TProfAddrSearchOut m_addr_search_out;
 
+	uint64_t m_trace_start_idx = 0;
+	uint64_t m_trace_stop_idx = UINT64_MAX;
+
 	virtual TySifiveTraceProfileError ProfilingThread();
 	virtual void CleanUpProfiling();
 	virtual void CleanUpAddrSearch();
@@ -252,7 +256,6 @@ public:
 	virtual TySifiveTraceProfileError StartAddrSearchThread(const TProfAddrSearchParams& search_params, const TProfAddrSearchDir& dir);
 	virtual TySifiveTraceProfileError AddrSearchThread(const TProfAddrSearchParams& search_params, const TProfAddrSearchDir& dir);
 	virtual bool IsSearchAddressFound(TProfAddrSearchOut& addr_out);
-
 	virtual TySifiveTraceProfileError StartHistogramThread();
 	virtual TySifiveTraceProfileError HistogramThread();
 	virtual void WaitForHistogramCompletion();
@@ -260,6 +263,8 @@ public:
 	virtual void SetEndOfDataHistGenerator();
 	virtual void SetHistogramCallback(std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins)> fp_callback);
 	virtual void ClearHistogram();
+	virtual void SetTraceStartIdx(const uint64_t trace_start_idx);
+	virtual void SetTraceStopIdx(const uint64_t trace_stop_idx);
 };
 
 // Function pointer typedef
