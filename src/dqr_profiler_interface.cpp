@@ -238,9 +238,24 @@ void SifiveProfilerInterface::ClearHistogram()
 ****************************************************************************/
 TySifiveTraceProfileError SifiveProfilerInterface::PushTraceData(uint8_t *p_buff, const uint64_t& size)
 {
-    if (m_profiling_trace == NULL)
-        return SIFIVE_TRACE_PROFILER_MEM_CREATE_ERR;
-    return (m_profiling_trace->PushTraceData(p_buff, size) == TraceDqrProfiler::DQERR_OK) ? SIFIVE_TRACE_PROFILER_OK : SIFIVE_TRACE_PROFILER_ERR;
+    TySifiveTraceProfileError ret = SIFIVE_TRACE_PROFILER_OK;
+    if (m_profiling_trace != NULL)
+    {
+        ret = (m_profiling_trace->PushTraceData(p_buff, size) == TraceDqrProfiler::DQERR_OK) ? SIFIVE_TRACE_PROFILER_OK : SIFIVE_TRACE_PROFILER_ERR;
+        if (ret != SIFIVE_TRACE_PROFILER_OK)
+        {
+            return ret;
+        }
+    }
+
+    if (m_addr_search_trace != NULL)
+    {
+        ret = (m_addr_search_trace->PushTraceData(p_buff, size) == TraceDqrProfiler::DQERR_OK) ? SIFIVE_TRACE_PROFILER_OK : SIFIVE_TRACE_PROFILER_ERR;
+        if (ret != SIFIVE_TRACE_PROFILER_OK)
+        {
+            return ret;
+        }
+    }
 }
 
 /****************************************************************************
