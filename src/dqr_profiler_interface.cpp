@@ -172,7 +172,14 @@ TySifiveTraceProfileError SifiveProfilerInterface::StartProfilingThread(uint32_t
 void SifiveProfilerInterface::SetEndOfData()
 {
     if (m_profiling_trace != NULL)
+    {
         m_profiling_trace->SetEndOfData();
+    }
+
+    if (m_addr_search_trace != NULL)
+    {
+        m_addr_search_trace->SetEndOfData();
+    }
 }
 
 /****************************************************************************
