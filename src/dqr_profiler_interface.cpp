@@ -826,6 +826,8 @@ void DeleteSifiveProfilerInterface(SifiveProfilerInterface** p_sifive_profiler_i
 ****************************************************************************/
 TySifiveTraceProfileError SifiveProfilerInterface::StartAddrSearchThread(const TProfAddrSearchParams& search_params, const TProfAddrSearchDir& dir)
 {
+    m_abort_profiling = false;
+
     m_addr_search_trace = new (std::nothrow) TraceProfiler(tf_name, ef_name, numAddrBits, addrDispFlags, srcbits, od_name, freq);
     if (m_addr_search_trace == nullptr)
     {
@@ -886,6 +888,11 @@ TySifiveTraceProfileError SifiveProfilerInterface::AddrSearchThread(const TProfA
     // Loop through the decoded instructions
     while (m_addr_search_trace->NextInstruction(&instInfo, &nm, address_out) == TraceDqrProfiler::DQERR_OK)
     {
+        if (m_abort_profiling)
+        {
+            return SIFIVE_TRACE_PROFILER_OK;
+        }
+
         // If the curr index exceeds the stop idx, we can return
         if (curr_ui_file_idx >= search_params.stop_ui_file_idx)
         {
@@ -1140,4 +1147,22 @@ void SifiveProfilerInterface::SetTraceStartIdx(const uint64_t trace_start_idx)
 void SifiveProfilerInterface::SetTraceStopIdx(const uint64_t trace_stop_idx)
 {
     m_trace_stop_idx = trace_stop_idx;
+}
+
+/****************************************************************************
+     Function: AbortSearch
+     Engineer: Arjun Suresh
+        Input: None
+       Output: None
+       return: None
+  Description: Destructor
+  Date         Initials    Description
+  09-Oct-2024  AS          Initial
+****************************************************************************/
+void SifiveProfilerInterface::AbortSearch()
+{
+    if(m_addr_search_trace)
+        m_addr_search_trace->SetEndOfData();
+    m_abort_profiling = true;
+    WaitForAddrSearchCompletion();
 }

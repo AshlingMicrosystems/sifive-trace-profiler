@@ -16,6 +16,7 @@
 #include <deque>
 #include <functional>
 #include <mutex>
+#include <atomic>
 
 #include "SocketIntf.h"
 #include "dqr_profiler.h"
@@ -236,6 +237,8 @@ private:
 	uint64_t m_trace_start_idx = 0;
 	uint64_t m_trace_stop_idx = UINT64_MAX;
 
+	std::atomic<bool> m_abort_search = false;
+
 	virtual TySifiveTraceProfileError ProfilingThread();
 	virtual void CleanUpProfiling();
 	virtual void CleanUpAddrSearch();
@@ -265,6 +268,7 @@ public:
 	virtual void ClearHistogram();
 	virtual void SetTraceStartIdx(const uint64_t trace_start_idx);
 	virtual void SetTraceStopIdx(const uint64_t trace_stop_idx);
+	virtual void AbortSearch();
 };
 
 // Function pointer typedef
