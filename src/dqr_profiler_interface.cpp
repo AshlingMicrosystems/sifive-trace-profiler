@@ -172,25 +172,66 @@ TySifiveTraceProfileError SifiveProfilerInterface::StartProfilingThread(uint32_t
 void SifiveProfilerInterface::SetEndOfData()
 {
     if (m_profiling_trace != NULL)
+    {
         m_profiling_trace->SetEndOfData();
+    }
+
+    if (m_addr_search_trace != NULL)
+    {
+        m_addr_search_trace->SetEndOfData();
+    }
 }
 
+/****************************************************************************
+     Function: SetEndOfDataHistGenerator
+     Engineer: Arjun Suresh
+        Input: None
+       Output: None
+       return: None
+  Description: Marks the end of trace data. If this is not called the histogram
+               thread will not exit as it will be waiting for more data.
+               Expected to be called at the end of a trace fetch.
+  Date         Initials    Description
+  26-Apr-2024  AS          Initial
+****************************************************************************/
 void SifiveProfilerInterface::SetEndOfDataHistGenerator()
 {
     if (m_hist_trace != NULL)
         m_hist_trace->SetEndOfData();
 }
 
+/****************************************************************************
+     Function: SetHistogramCallback
+     Engineer: Arjun Suresh
+        Input: fp_callback - Function pointer to the callback
+       Output: None
+       return: None
+  Description: Sets the histogram callback
+  Date         Initials    Description
+  26-Apr-2024  AS          Initial
+****************************************************************************/
 void SifiveProfilerInterface::SetHistogramCallback(std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins)> fp_callback)
 {
     if (m_hist_trace != NULL)
         m_hist_trace->SetHistogramCallback(fp_callback);
 }
+
+/****************************************************************************
+     Function: ClearHistogram
+     Engineer: Arjun Suresh
+        Input: None
+       Output: None
+       return: None
+  Description: Clears the histogram
+  Date         Initials    Description
+  26-Apr-2024  AS          Initial
+****************************************************************************/
 void SifiveProfilerInterface::ClearHistogram()
 {
     if (m_hist_trace != NULL)
         m_hist_trace->ClearHistogram();
 }
+
 /****************************************************************************
      Function: PushTraceData
      Engineer: Arjun Suresh
@@ -204,13 +245,28 @@ void SifiveProfilerInterface::ClearHistogram()
 ****************************************************************************/
 TySifiveTraceProfileError SifiveProfilerInterface::PushTraceData(uint8_t *p_buff, const uint64_t& size)
 {
-    if (m_profiling_trace == NULL)
-        return SIFIVE_TRACE_PROFILER_MEM_CREATE_ERR;
-    return (m_profiling_trace->PushTraceData(p_buff, size) == TraceDqrProfiler::DQERR_OK) ? SIFIVE_TRACE_PROFILER_OK : SIFIVE_TRACE_PROFILER_ERR;
+    TySifiveTraceProfileError ret = SIFIVE_TRACE_PROFILER_OK;
+    if (m_profiling_trace != NULL)
+    {
+        ret = (m_profiling_trace->PushTraceData(p_buff, size) == TraceDqrProfiler::DQERR_OK) ? SIFIVE_TRACE_PROFILER_OK : SIFIVE_TRACE_PROFILER_ERR;
+        if (ret != SIFIVE_TRACE_PROFILER_OK)
+        {
+            return ret;
+        }
+    }
+
+    if (m_addr_search_trace != NULL)
+    {
+        ret = (m_addr_search_trace->PushTraceData(p_buff, size) == TraceDqrProfiler::DQERR_OK) ? SIFIVE_TRACE_PROFILER_OK : SIFIVE_TRACE_PROFILER_ERR;
+        if (ret != SIFIVE_TRACE_PROFILER_OK)
+        {
+            return ret;
+        }
+    }
 }
 
 /****************************************************************************
-     Function: PushTraceData
+     Function: PushTraceDataToHistGenerator
      Engineer: Arjun Suresh
         Input: p_buff - Pointer to buffer that contains the trace data
                size - Size in bytes of the trace data
@@ -226,7 +282,6 @@ TySifiveTraceProfileError SifiveProfilerInterface::PushTraceDataToHistGenerator(
         return SIFIVE_TRACE_PROFILER_MEM_CREATE_ERR;
     return (m_hist_trace->PushTraceData(p_buff, size) == TraceDqrProfiler::DQERR_OK) ? SIFIVE_TRACE_PROFILER_OK : SIFIVE_TRACE_PROFILER_ERR;
 }
-
 
 /****************************************************************************
      Function: WaitForProfilerCompletion
@@ -348,6 +403,14 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
 
         next_ins_ret = m_profiling_trace->NextInstruction(&instInfo, &nm, address_out);
         if (next_ins_ret != TraceDqrProfiler::DQERR_OK)
+        {
+            exit_reason = PROF_THREAD_EXIT_NEXT_INS;
+            break;
+        }
+
+        if (nm->offset < m_trace_start_idx)
+            continue;
+        if (nm->offset > m_trace_stop_idx)
         {
             exit_reason = PROF_THREAD_EXIT_NEXT_INS;
             break;
@@ -561,6 +624,16 @@ void SifiveProfilerInterface::CleanUpProfiling()
 	}
 }
 
+/****************************************************************************
+     Function: CleanUpAddrSearch
+     Engineer: Arjun Suresh
+        Input: None
+       Output: None
+       return: None
+  Description: CleanUp Function
+  Date         Initials    Description
+2-Nov-2022     AS          Initial
+****************************************************************************/
 void SifiveProfilerInterface::CleanUpAddrSearch()
 {
     if (m_addr_search_trace != nullptr) {
@@ -571,6 +644,16 @@ void SifiveProfilerInterface::CleanUpAddrSearch()
     }
 }
 
+/****************************************************************************
+     Function: CleanUpHistogram
+     Engineer: Arjun Suresh
+        Input: None
+       Output: None
+       return: None
+  Description: CleanUp Function
+  Date         Initials    Description
+2-Nov-2022     AS          Initial
+****************************************************************************/
 void SifiveProfilerInterface::CleanUpHistogram()
 {
     if (m_hist_trace != nullptr) {
@@ -934,6 +1017,16 @@ void SifiveProfilerInterface::WaitForAddrSearchCompletion()
     CleanUpAddrSearch();
 }
 
+/****************************************************************************
+     Function: StartHistogramThread
+     Engineer: Arjun Suresh
+        Input: None
+       Output: None
+       return: None
+  Description: Starts the histogram generation thread
+  Date         Initials    Description
+  26-Apr-2024  AS          Initial
+****************************************************************************/
 TySifiveTraceProfileError SifiveProfilerInterface::StartHistogramThread()
 {
     m_hist_trace = new (std::nothrow) TraceProfiler(tf_name, ef_name, numAddrBits, addrDispFlags, srcbits, od_name, freq);
@@ -968,6 +1061,16 @@ TySifiveTraceProfileError SifiveProfilerInterface::StartHistogramThread()
     return SIFIVE_TRACE_PROFILER_OK;
 }
 
+/****************************************************************************
+     Function: HistogramThread
+     Engineer: Arjun Suresh
+        Input: None
+       Output: None
+       return: None
+  Description: Histogram Thread
+  Date         Initials    Description
+  26-Apr-2024  AS          Initial
+****************************************************************************/
 TySifiveTraceProfileError SifiveProfilerInterface::HistogramThread()
 {
     TraceDqrProfiler::DQErr next_ins_ret;
@@ -975,6 +1078,16 @@ TySifiveTraceProfileError SifiveProfilerInterface::HistogramThread()
     return SIFIVE_TRACE_PROFILER_OK;
 }
 
+/****************************************************************************
+     Function: WaitForHistogramCompletion
+     Engineer: Arjun Suresh
+        Input: None
+       Output: None
+       return: None
+  Description: Wait for Histogram Thread completion
+  Date         Initials    Description
+  26-Apr-2024  AS          Initial
+****************************************************************************/
 void SifiveProfilerInterface::WaitForHistogramCompletion()
 {
     if (m_hist_thread.joinable())
@@ -982,9 +1095,49 @@ void SifiveProfilerInterface::WaitForHistogramCompletion()
     CleanUpHistogram();
 }
 
+/****************************************************************************
+     Function: ~SifiveProfilerInterface
+     Engineer: Arjun Suresh
+        Input: None
+       Output: None
+       return: None
+  Description: Destructor
+  Date         Initials    Description
+  26-Apr-2024  AS          Initial
+****************************************************************************/
 SifiveProfilerInterface::~SifiveProfilerInterface()
 {
     CleanUpProfiling();
     CleanUpAddrSearch();
     CleanUpHistogram();
+}
+
+/****************************************************************************
+     Function: SetTraceStartIdx
+     Engineer: Arjun Suresh
+        Input: trace_start_idx - Trace start idx
+       Output: None
+       return: None
+  Description: Destructor
+  Date         Initials    Description
+  22-Sep-2024  AS          Initial
+****************************************************************************/
+void SifiveProfilerInterface::SetTraceStartIdx(const uint64_t trace_start_idx)
+{
+    m_trace_start_idx = trace_start_idx;
+}
+
+/****************************************************************************
+     Function: SetTraceStopIdx
+     Engineer: Arjun Suresh
+        Input: trace_stop_idx - Trace stop idx
+       Output: None
+       return: None
+  Description: Destructor
+  Date         Initials    Description
+  22-Sep-2024  AS          Initial
+****************************************************************************/
+void SifiveProfilerInterface::SetTraceStopIdx(const uint64_t trace_stop_idx)
+{
+    m_trace_stop_idx = trace_stop_idx;
 }
