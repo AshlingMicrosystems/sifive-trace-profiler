@@ -3719,6 +3719,12 @@ TraceDqrProfiler::DQErr ElfReader::getInstructionByAddress(TraceDqrProfiler::ADD
 		return status;
 	}
 
+	if (sp->code == NULL)
+	{
+		status = TraceDqrProfiler::DQERR_ERR;
+		return status;
+	}
+
 	//	if ((addr < text->vma) || (addr >= text->vma + text->size)) {
 	////			don't know instruction - not part of text segment. need to handle for os
 	////			if we can't get the instruciton, get the next trace message and try again. or do
