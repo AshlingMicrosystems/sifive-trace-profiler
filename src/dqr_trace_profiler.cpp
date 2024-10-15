@@ -5806,8 +5806,9 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 			if (status != TraceDqrProfiler::DQERR_OK) {
 				printf("Error: nextAddr() failed\n");
 
-				state[currentCore] = TRACE_STATE_ERROR;
+				state[currentCore] = TRACE_STATE_GETFIRSTSYNCMSG;
 
+				status = TraceDqrProfiler::DQERR_OK;
 				return status;
 			}
 
