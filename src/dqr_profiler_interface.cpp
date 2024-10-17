@@ -210,8 +210,9 @@ void SifiveProfilerInterface::SetEndOfDataHistGenerator()
   Date         Initials    Description
   26-Apr-2024  AS          Initial
 ****************************************************************************/
-void SifiveProfilerInterface::SetHistogramCallback(std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins)> fp_callback)
+void SifiveProfilerInterface::SetHistogramCallback(std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins, int32_t ret)> fp_callback)
 {
+    m_fp_hist_callback = fp_callback;
     if (m_hist_trace != NULL)
         m_hist_trace->SetHistogramCallback(fp_callback);
 }
@@ -1073,8 +1074,13 @@ TySifiveTraceProfileError SifiveProfilerInterface::StartHistogramThread()
 ****************************************************************************/
 TySifiveTraceProfileError SifiveProfilerInterface::HistogramThread()
 {
-    TraceDqrProfiler::DQErr next_ins_ret;
-    m_hist_trace->GenerateHistogram();
+    TraceDqrProfiler::DQErr ret;
+    ret = m_hist_trace->GenerateHistogram();
+    if (ret != TraceDqrProfiler::DQERR_EOF)
+    {
+        LOG_ERR("Histogram Thread Exit Due to Error %d", ret);
+    }
+    LOG_DEBUG("Histogram Thread Return %d", ret);
     return SIFIVE_TRACE_PROFILER_OK;
 }
 

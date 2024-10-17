@@ -236,6 +236,8 @@ private:
 	uint64_t m_trace_start_idx = 0;
 	uint64_t m_trace_stop_idx = UINT64_MAX;
 
+	std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins, int32_t ret)> m_fp_hist_callback = nullptr;
+
 	virtual TySifiveTraceProfileError ProfilingThread();
 	virtual void CleanUpProfiling();
 	virtual void CleanUpAddrSearch();
@@ -261,7 +263,7 @@ public:
 	virtual void WaitForHistogramCompletion();
 	virtual TySifiveTraceProfileError PushTraceDataToHistGenerator(uint8_t* p_buff, const uint64_t& size);
 	virtual void SetEndOfDataHistGenerator();
-	virtual void SetHistogramCallback(std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins)> fp_callback);
+	virtual void SetHistogramCallback(std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins, int32_t ret)> fp_callback);
 	virtual void ClearHistogram();
 	virtual void SetTraceStartIdx(const uint64_t trace_start_idx);
 	virtual void SetTraceStopIdx(const uint64_t trace_stop_idx);
