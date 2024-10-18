@@ -1074,12 +1074,18 @@ TySifiveTraceProfileError SifiveProfilerInterface::StartHistogramThread()
 ****************************************************************************/
 TySifiveTraceProfileError SifiveProfilerInterface::HistogramThread()
 {
-    TraceDqrProfiler::DQErr ret;
-    ret = m_hist_trace->GenerateHistogram();
+    if (!m_hist_trace)
+    {
+        return SIFIVE_TRACE_PROFILER_ERR;
+    }
+
+    TraceDqrProfiler::DQErr ret = m_hist_trace->GenerateHistogram();
     if (ret != TraceDqrProfiler::DQERR_EOF)
     {
         LOG_ERR("Histogram Thread Exit Due to Error %d", ret);
+        return SIFIVE_TRACE_PROFILER_ERR;
     }
+
     LOG_DEBUG("Histogram Thread Return %d", ret);
     return SIFIVE_TRACE_PROFILER_OK;
 }
@@ -1146,4 +1152,22 @@ void SifiveProfilerInterface::SetTraceStartIdx(const uint64_t trace_start_idx)
 void SifiveProfilerInterface::SetTraceStopIdx(const uint64_t trace_stop_idx)
 {
     m_trace_stop_idx = trace_stop_idx;
+}
+
+/****************************************************************************
+     Function: AbortHistogramThread
+     Engineer: Arjun Suresh
+        Input: None
+       Output: None
+       return: None
+  Description: Sets the histogram abort flag
+  Date         Initials    Description
+18-Oct-2024    AS          Initial
+****************************************************************************/
+void SifiveProfilerInterface::AbortHistogramThread()
+{
+    if (m_hist_trace)
+    {
+        m_hist_trace->AbortHistogramThread();
+    }
 }

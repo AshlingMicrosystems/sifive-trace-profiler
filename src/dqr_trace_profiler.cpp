@@ -7457,6 +7457,11 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 
 TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 {
+	{
+		std::lock_guard<std::mutex> m_abort_profiling_mutex_guard(m_abort_histogram_mutex);
+		m_abort_histogram = false;
+	}
+
 	if (status != TraceDqrProfiler::DQERR_OK)
 	{
 		if (m_fp_hist_callback)
@@ -7526,6 +7531,15 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 
 			readNewTraceMessage = false;
 			currentCore = nm.coreId;
+		}
+
+		{
+			std::lock_guard<std::mutex> m_abort_profiling_mutex_guard(m_abort_histogram_mutex);
+			if (m_abort_histogram)
+			{
+				status = TraceDqrProfiler::DQERR_EOF;
+				return status;
+			}
 		}
 
 		switch (state[currentCore])

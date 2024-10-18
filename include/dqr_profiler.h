@@ -835,6 +835,13 @@ public:
 	{
 		m_hist_map.clear();
 	}
+	void AbortHistogramThread()
+	{
+		{
+			std::lock_guard<std::mutex> m_abort_profiling_mutex_guard(m_abort_histogram_mutex);
+			m_abort_histogram = true;
+		}
+	}
 private:
 	enum state {
 		TRACE_STATE_SYNCCATE,
@@ -901,6 +908,9 @@ private:
 	TraceDqrProfiler::TIMESTAMP lastCycle[DQR_PROFILER_MAXCORES];
 	int               eCycleCount[DQR_PROFILER_MAXCORES];
 	std::mutex m_hist_mutex;
+
+	std::mutex m_abort_histogram_mutex;
+	bool m_abort_histogram = false;
 
 	TraceDqrProfiler::DQErr configure(class TraceSettings& settings);
 

@@ -267,6 +267,7 @@ public:
 	virtual void ClearHistogram();
 	virtual void SetTraceStartIdx(const uint64_t trace_start_idx);
 	virtual void SetTraceStopIdx(const uint64_t trace_stop_idx);
+	virtual void AbortHistogramThread();
 };
 
 // Function pointer typedef
