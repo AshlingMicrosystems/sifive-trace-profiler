@@ -826,7 +826,7 @@ void DeleteSifiveProfilerInterface(SifiveProfilerInterface** p_sifive_profiler_i
 ****************************************************************************/
 TySifiveTraceProfileError SifiveProfilerInterface::StartAddrSearchThread(const TProfAddrSearchParams& search_params, const TProfAddrSearchDir& dir)
 {
-    m_abort_profiling = false;
+    m_abort_search = false;
 
     m_addr_search_trace = new (std::nothrow) TraceProfiler(tf_name, ef_name, numAddrBits, addrDispFlags, srcbits, od_name, freq);
     if (m_addr_search_trace == nullptr)
@@ -888,7 +888,7 @@ TySifiveTraceProfileError SifiveProfilerInterface::AddrSearchThread(const TProfA
     // Loop through the decoded instructions
     while (m_addr_search_trace->NextInstruction(&instInfo, &nm, address_out) == TraceDqrProfiler::DQERR_OK)
     {
-        if (m_abort_profiling)
+        if (m_abort_search)
         {
             return SIFIVE_TRACE_PROFILER_OK;
         }
@@ -1019,6 +1019,7 @@ bool SifiveProfilerInterface::IsSearchAddressFound(TProfAddrSearchOut& addr_loc)
 ****************************************************************************/
 void SifiveProfilerInterface::WaitForAddrSearchCompletion()
 {
+    std::lock_guard<std::mutex> m_wait_for_search_complete_guard(m_wait_for_search_complete_mutex);
     if (m_addr_search_thread.joinable())
         m_addr_search_thread.join();
     CleanUpAddrSearch();
@@ -1163,6 +1164,6 @@ void SifiveProfilerInterface::AbortSearch()
 {
     if(m_addr_search_trace)
         m_addr_search_trace->SetEndOfData();
-    m_abort_profiling = true;
+    m_abort_search = true;
     WaitForAddrSearchCompletion();
 }

@@ -225,6 +225,7 @@ private:
 	std::mutex m_flush_data_offsets_mutex;                                    // Mutex for synchronization
 	std::mutex m_buffer_data_mutex;											  // Mutex for synchronization
 	std::mutex m_search_addr_mutex;										      // Mutex for synchronization
+	std::mutex m_wait_for_search_complete_mutex;							  // Mutex for synchronization
 
 	bool m_flush_socket_data = false;
 	std::deque<uint64_t> m_flush_data_offsets;
