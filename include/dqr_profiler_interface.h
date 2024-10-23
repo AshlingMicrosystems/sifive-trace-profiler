@@ -238,7 +238,7 @@ private:
 	uint64_t m_trace_start_idx = 0;
 	uint64_t m_trace_stop_idx = UINT64_MAX;
 
-	std::atomic<bool> m_abort_search = false;
+	std::atomic<bool> m_abort_search;
 
 	virtual TySifiveTraceProfileError ProfilingThread();
 	virtual void CleanUpProfiling();
