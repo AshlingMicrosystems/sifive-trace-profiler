@@ -5806,8 +5806,9 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 			if (status != TraceDqrProfiler::DQERR_OK) {
 				printf("Error: nextAddr() failed\n");
 
-				state[currentCore] = TRACE_STATE_ERROR;
+				state[currentCore] = TRACE_STATE_GETFIRSTSYNCMSG;
 
+				status = TraceDqrProfiler::DQERR_OK;
 				return status;
 			}
 
@@ -7456,8 +7457,15 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 
 TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 {
+	{
+		std::lock_guard<std::mutex> m_abort_profiling_mutex_guard(m_abort_histogram_mutex);
+		m_abort_histogram = false;
+	}
+
 	if (status != TraceDqrProfiler::DQERR_OK)
 	{
+		if (m_fp_hist_callback)
+			m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), 0, (int32_t)status);
 		return status;
 	}
 
@@ -7481,13 +7489,13 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 				if (n_ins_cnt > next_offset)
 				{
 					if (m_fp_hist_callback)
-						m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt);
+						m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 					next_offset += update_offset;
 				}
 				if ((nm.offset + nm.size_message) >= m_flush_data_offset)
 				{
 					if (m_fp_hist_callback)
-						m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt);
+						m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 				}
 				rc = sfp->readNextTraceMsg(nm, analytics, haveMsg);
 				if (rc != TraceDqrProfiler::DQERR_OK)
@@ -7507,7 +7515,7 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 					complete = true;
 					m_flush_data_offset = 0xFFFFFFFFFFFFFFFF;
 					if (m_fp_hist_callback)
-						m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt);
+						m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 					return status;
 				}
 				complete = false;
@@ -7525,6 +7533,15 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 			currentCore = nm.coreId;
 		}
 
+		{
+			std::lock_guard<std::mutex> m_abort_profiling_mutex_guard(m_abort_histogram_mutex);
+			if (m_abort_histogram)
+			{
+				status = TraceDqrProfiler::DQERR_EOF;
+				return status;
+			}
+		}
+
 		switch (state[currentCore])
 		{
 		case TRACE_STATE_GETFIRSTSYNCMSG:
@@ -7538,6 +7555,8 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 				if (rc != TraceDqrProfiler::DQERR_OK) {
 					status = TraceDqrProfiler::DQERR_ERR;
 					state[currentCore] = TRACE_STATE_ERROR;
+					if (m_fp_hist_callback)
+						m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 					return status;
 				}
 				state[currentCore] = TRACE_STATE_GETMSGWITHCOUNT;
@@ -7562,6 +7581,8 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 			default:
 				state[currentCore] = TRACE_STATE_ERROR;
 				status = TraceDqrProfiler::DQERR_ERR;
+				if (m_fp_hist_callback)
+					m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 				return status;
 			}
 			readNewTraceMessage = true;
@@ -7583,6 +7604,8 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 				if (rc != TraceDqrProfiler::DQERR_OK) {
 					state[currentCore] = TRACE_STATE_ERROR;
 					status = rc;
+					if (m_fp_hist_callback)
+						m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 					return status;
 				}
 				state[currentCore] = TRACE_STATE_GETNEXTINSTRUCTION;
@@ -7605,7 +7628,8 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 
 					status = TraceDqrProfiler::DQERR_ERR;
 					state[currentCore] = TRACE_STATE_ERROR;
-
+					if (m_fp_hist_callback)
+						m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 					return status;
 				}
 				readNewTraceMessage = true;
@@ -7619,7 +7643,8 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 
 				state[currentCore] = TRACE_STATE_ERROR;
 				status = TraceDqrProfiler::DQERR_ERR;
-
+				if (m_fp_hist_callback)
+					m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 				return status;
 			}
 			break;
@@ -7639,6 +7664,8 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 					printf("Error: NextInstruction(): state TRACE_STATE_RETIREMESSAGE: processTraceMessage()\n");
 					status = TraceDqrProfiler::DQERR_ERR;
 					state[currentCore] = TRACE_STATE_ERROR;
+					if (m_fp_hist_callback)
+						m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 					return status;
 				}
 				readNewTraceMessage = true;
@@ -7657,6 +7684,8 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 				printf("Error: bad tcode type in state TRACE_STATE_RETIREMESSAGE\n");
 				state[currentCore] = TRACE_STATE_ERROR;
 				status = TraceDqrProfiler::DQERR_ERR;
+				if (m_fp_hist_callback)
+					m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 				return status;
 			}
 
@@ -7678,6 +7707,8 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 					printf("Error: nextInstruction: state TRACE_STATE_GETNEXTMESSAGE Count::seteCounts()\n");
 					state[currentCore] = TRACE_STATE_ERROR;
 					status = rc;
+					if (m_fp_hist_callback)
+						m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 					return status;
 				}
 				state[currentCore] = TRACE_STATE_GETNEXTINSTRUCTION;
@@ -7698,9 +7729,13 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 				if (rc != TraceDqrProfiler::DQERR_OK) {
 					status = TraceDqrProfiler::DQERR_ERR;
 					state[currentCore] = TRACE_STATE_ERROR;
+					if (m_fp_hist_callback)
+						m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 					return status;
 				}
 				readNewTraceMessage = true;
+				if (m_fp_hist_callback)
+					m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 				return status;
 			case TraceDqrProfiler::TCODE_OWNERSHIP_TRACE:
 				readNewTraceMessage = true;
@@ -7708,6 +7743,8 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 			default:
 				state[currentCore] = TRACE_STATE_ERROR;
 				status = TraceDqrProfiler::DQERR_ERR;
+				if (m_fp_hist_callback)
+					m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 				return status;
 			}
 			break;
@@ -7746,6 +7783,8 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 				if (status != TraceDqrProfiler::DQERR_OK)
 				{
 					state[currentCore] = TRACE_STATE_ERROR;
+					if (m_fp_hist_callback)
+						m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 					return status;
 				}
 
@@ -7779,17 +7818,25 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 			break;
 		case TRACE_STATE_DONE:
 			status = TraceDqrProfiler::DQERR_DONE;
+			if (m_fp_hist_callback)
+				m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 			return status;
 		case TRACE_STATE_ERROR:
 			status = TraceDqrProfiler::DQERR_ERR;
+			if (m_fp_hist_callback)
+				m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 			return status;
 		default:
 			state[currentCore] = TRACE_STATE_ERROR;
 			status = TraceDqrProfiler::DQERR_ERR;
+			if (m_fp_hist_callback)
+				m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 			return status;
 		}
 	}
 
 	status = TraceDqrProfiler::DQERR_OK;
+	if (m_fp_hist_callback)
+		m_fp_hist_callback(m_hist_map, (nm.offset + nm.size_message), n_ins_cnt, (int32_t)status);
 	return TraceDqrProfiler::DQERR_OK;
 }
