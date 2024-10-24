@@ -16,6 +16,7 @@
 #include <deque>
 #include <functional>
 #include <mutex>
+#include <atomic>
 
 #include "SocketIntf.h"
 #include "dqr_profiler.h"
@@ -224,6 +225,7 @@ private:
 	std::mutex m_flush_data_offsets_mutex;                                    // Mutex for synchronization
 	std::mutex m_buffer_data_mutex;											  // Mutex for synchronization
 	std::mutex m_search_addr_mutex;										      // Mutex for synchronization
+	std::mutex m_wait_for_search_complete_mutex;							  // Mutex for synchronization
 
 	bool m_flush_socket_data = false;
 	std::deque<uint64_t> m_flush_data_offsets;
@@ -235,6 +237,9 @@ private:
 
 	uint64_t m_trace_start_idx = 0;
 	uint64_t m_trace_stop_idx = UINT64_MAX;
+
+	std::atomic<bool> m_abort_search;
+
 
 	std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins, int32_t ret)> m_fp_hist_callback = nullptr;
 
@@ -268,6 +273,7 @@ public:
 	virtual void SetTraceStartIdx(const uint64_t trace_start_idx);
 	virtual void SetTraceStopIdx(const uint64_t trace_stop_idx);
 	virtual void AbortHistogramThread();
+	virtual void AbortSearch();
 };
 
 // Function pointer typedef
