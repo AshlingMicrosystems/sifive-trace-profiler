@@ -2483,7 +2483,8 @@ TraceProfiler::TraceProfiler(char* tf_name, char* ef_name, int numAddrBits, uint
 	ts.addrDispFlags = addrDispFlags;
 	ts.srcBits = srcBits;
 	ts.freq = freq;
-
+    ts.itcPrintOpts = 0;
+	
 	rc = configure(ts);
 
 	if (rc != TraceDqrProfiler::DQERR_OK) {
@@ -2725,7 +2726,7 @@ TraceDqrProfiler::DQErr TraceProfiler::configure(TraceSettings& settings)
 		enterISR[i] = TraceDqrProfiler::isNone;
 	}
 
-	status = setITCPrintOptions(TraceDqrProfiler::ITC_OPT_NLS, 4096, 0);
+	status = setITCPrintOptions(TraceDqrProfiler::ITC_OPT_NONE, 4096, 0);
 
 	if (settings.itcPrintOpts != TraceDqrProfiler::ITC_OPT_NONE) {
 		rc = setITCPrintOptions(settings.itcPrintOpts, settings.itcPrintBufferSize, settings.itcPrintChannel);
@@ -4174,6 +4175,8 @@ TraceDqrProfiler::DQErr TraceProfiler::processTraceMessage(ProfilerNexusMessage&
 	case TraceDqrProfiler::TCODE_AUXACCESS_WRITE:
 	case TraceDqrProfiler::TCODE_RESOURCEFULL:
 	case TraceDqrProfiler::TCODE_CORRELATION:
+	case TraceDqrProfiler::TCODE_REPEATBRANCH:
+	case TraceDqrProfiler::TCODE_TRAP_INFO:	
 		if (nm.haveTimestamp) {
 			ts = processTS(TraceDqrProfiler::TS_rel, ts, nm.timestamp);
 		}
@@ -4646,7 +4649,6 @@ TraceDqrProfiler::DQErr TraceProfiler::processTraceMessage(ProfilerNexusMessage&
 	case TraceDqrProfiler::TCODE_AUXACCESS_READNEXT:
 	case TraceDqrProfiler::TCODE_AUXACCESS_WRITENEXT:
 	case TraceDqrProfiler::TCODE_AUXACCESS_RESPONSE:
-	case TraceDqrProfiler::TCODE_REPEATBRANCH:
 	case TraceDqrProfiler::TCODE_REPEATINSTRUCTION:
 	case TraceDqrProfiler::TCODE_REPEATINSTRUCTION_WS:
 	case TraceDqrProfiler::TCODE_UNDEFINED:
@@ -4850,6 +4852,8 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 				case TraceDqrProfiler::TCODE_AUXACCESS_WRITE:
 				case TraceDqrProfiler::TCODE_INCIRCUITTRACE:
 				case TraceDqrProfiler::TCODE_INCIRCUITTRACE_WS:
+				case TraceDqrProfiler::TCODE_REPEATBRANCH:
+				case TraceDqrProfiler::TCODE_TRAP_INFO:				
 					break;
 				case TraceDqrProfiler::TCODE_CORRELATION:
 					if (nm.correlation.cdf == 1) {
@@ -4863,7 +4867,6 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 					traceType = TraceDqrProfiler::TRACETYPE_HTM;
 					if (profiler_globalDebugFlag) printf("History/taken/not taken count TCODE: switching to HTM mode\n");
 					break;
-				case TraceDqrProfiler::TCODE_REPEATBRANCH:
 				case TraceDqrProfiler::TCODE_REPEATINSTRUCTION:
 				case TraceDqrProfiler::TCODE_REPEATINSTRUCTION_WS:
 				case TraceDqrProfiler::TCODE_AUXACCESS_READNEXT:
@@ -4953,7 +4956,7 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 			case TraceDqrProfiler::TCODE_CORRELATION:
 			case TraceDqrProfiler::TCODE_RESOURCEFULL:
 			case TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY:
-			case TraceDqrProfiler::TCODE_REPEATBRANCH:
+			//case TraceDqrProfiler::TCODE_REPEATBRANCH:
 			case TraceDqrProfiler::TCODE_REPEATINSTRUCTION:
 			case TraceDqrProfiler::TCODE_REPEATINSTRUCTION_WS:
 			case TraceDqrProfiler::TCODE_AUXACCESS_READNEXT:
@@ -5305,6 +5308,18 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 			case TraceDqrProfiler::TCODE_CORRELATION:
 				if (nm.timestamp) {
 					lastTime[currentCore] = processTS(TraceDqrProfiler::TS_rel, lastTime[currentCore], nm.timestamp);
+				}
+				break;
+			case TraceDqrProfiler::TCODE_TRAP_INFO:
+			case TraceDqrProfiler::TCODE_REPEATBRANCH:
+				rc = processTraceMessage(nm,currentAddress[currentCore],lastFaddr[currentCore],lastTime[currentCore],consumed);
+				if (rc != TraceDqrProfiler::DQERR_OK) {
+					printf("Error: NextInstruction(): state TRACE_STATE_GETFIRSTSYNCMSG: processTraceMessage()\n");
+
+					status = TraceDqrProfiler::DQERR_ERR;
+					state[currentCore] = TRACE_STATE_ERROR;
+
+					return status;
 				}
 				break;
 			case TraceDqrProfiler::TCODE_ERROR:
@@ -6805,6 +6820,8 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 
 				return status;
 			case TraceDqrProfiler::TCODE_DATA_ACQUISITION:
+			case TraceDqrProfiler::TCODE_TRAP_INFO:
+			case TraceDqrProfiler::TCODE_REPEATBRANCH:			
 				rc = processTraceMessage(nm, currentAddress[currentCore], lastFaddr[currentCore], lastTime[currentCore], consumed);
 				if (rc != TraceDqrProfiler::DQERR_OK) {
 					printf("Error: NextInstruction(): state TRACE_STATE_GETMSGWITHCOUNT: processTraceMessage()\n");
@@ -6899,6 +6916,7 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 				}
 
 				if (msgInfo != nullptr) {
+					previousNM = nm;
 					messageInfo = nm;
 					messageInfo.time = lastTime[currentCore];
 
@@ -6960,6 +6978,20 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 
 				readNewTraceMessage = true;
 				state[currentCore] = TRACE_STATE_GETNEXTMSG;
+				break;
+			case TraceDqrProfiler::TCODE_TRAP_INFO:
+			case TraceDqrProfiler::TCODE_REPEATBRANCH:
+				rc = processTraceMessage(nm,currentAddress[currentCore],lastFaddr[currentCore],lastTime[currentCore],consumed);
+				if (rc != TraceDqrProfiler::DQERR_OK) {
+					printf("Error: NextInstruction(): state TRACE_STATE_RETIREMESSAGE: processTraceMessage()\n");
+
+					status = TraceDqrProfiler::DQERR_ERR;
+					state[currentCore] = TRACE_STATE_ERROR;
+
+					return status;
+				}
+
+				readNewTraceMessage = true;
 				break;
 			case TraceDqrProfiler::TCODE_INCIRCUITTRACE:
 			case TraceDqrProfiler::TCODE_INCIRCUITTRACE_WS:
@@ -7141,6 +7173,8 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 				return status;
 			case TraceDqrProfiler::TCODE_AUXACCESS_WRITE:
 			case TraceDqrProfiler::TCODE_DATA_ACQUISITION:
+			case TraceDqrProfiler::TCODE_TRAP_INFO:
+			case TraceDqrProfiler::TCODE_REPEATBRANCH:			
 				rc = processTraceMessage(nm, currentAddress[currentCore], lastFaddr[currentCore], lastTime[currentCore], consumed);
 				if (rc != TraceDqrProfiler::DQERR_OK) {
 					printf("Error: NextInstruction(): state TRACE_STATE_GETNXTMSG: processTraceMessage()\n");

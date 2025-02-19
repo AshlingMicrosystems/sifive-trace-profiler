@@ -429,6 +429,7 @@ private:
 	TraceDqrProfiler::DQErr parseCorrelation(ProfilerNexusMessage& nm, ProfilerAnalytics& analytics);
 	TraceDqrProfiler::DQErr parseAuxAccessWrite(ProfilerNexusMessage& nm, ProfilerAnalytics& analytics);
 	TraceDqrProfiler::DQErr parseDataAcquisition(ProfilerNexusMessage& nm, ProfilerAnalytics& analytics);
+    TraceDqrProfiler::DQErr parseRepeatBranch(ProfilerNexusMessage&nm, ProfilerAnalytics&analytics);
 	TraceDqrProfiler::DQErr parseOwnershipTrace(ProfilerNexusMessage& nm, ProfilerAnalytics& analytics);
 	TraceDqrProfiler::DQErr parseError(ProfilerNexusMessage& nm, ProfilerAnalytics& analytics);
 	TraceDqrProfiler::DQErr parseIndirectHistory(ProfilerNexusMessage& nm, ProfilerAnalytics& analytics);
@@ -436,6 +437,7 @@ private:
 	TraceDqrProfiler::DQErr parseResourceFull(ProfilerNexusMessage& nm, ProfilerAnalytics& analytics);
 	TraceDqrProfiler::DQErr parseICT(ProfilerNexusMessage& nm, ProfilerAnalytics& analytics);
 	TraceDqrProfiler::DQErr parseICTWS(ProfilerNexusMessage& nm, ProfilerAnalytics& analytics);
+	TraceDqrProfiler::DQErr parseTrapInfo(ProfilerNexusMessage&nm, ProfilerAnalytics&analytics);
 };
 #if 1
 class propertiesParser {
