@@ -4886,6 +4886,11 @@ TraceDqrProfiler::DQErr ProfilerAnalytics::updateTraceInfo(ProfilerNexusMessage&
 
 		have_faddr = true;
 		break;
+	case TraceDqrProfiler::TCODE_REPEATBRANCH:
+		core[nm.coreId].num_trace_rbranch += 1;
+		core[nm.coreId].trace_bits_rbranch += bits;
+		num_branches_all_cores += nm.repeatBranch.b_cnt;
+		break;
 	case TraceDqrProfiler::TCODE_AUXACCESS_WRITE:
 		core[nm.coreId].num_trace_auxaccesswrite += 1;
 		core[nm.coreId].trace_bits_auxaccesswrite += bits;
@@ -5066,6 +5071,10 @@ TraceDqrProfiler::DQErr ProfilerAnalytics::updateTraceInfo(ProfilerNexusMessage&
 		core[nm.coreId].trace_bits_incircuittraceWS += bits;
 		have_faddr = true;
 		break;
+	case TraceDqrProfiler::TCODE_TRAP_INFO:
+		core[nm.coreId].num_trace_trapinfo += 1;
+		core[nm.coreId].trace_bits_trapinfo += bits;
+		break;
 	case TraceDqrProfiler::TCODE_DEBUG_STATUS:
 	case TraceDqrProfiler::TCODE_DEVICE_ID:
 	case TraceDqrProfiler::TCODE_DATA_WRITE:
@@ -5080,7 +5089,6 @@ TraceDqrProfiler::DQErr ProfilerAnalytics::updateTraceInfo(ProfilerNexusMessage&
 	case TraceDqrProfiler::TCODE_AUXACCESS_READNEXT:
 	case TraceDqrProfiler::TCODE_AUXACCESS_WRITENEXT:
 	case TraceDqrProfiler::TCODE_AUXACCESS_RESPONSE:
-	case TraceDqrProfiler::TCODE_REPEATBRANCH:
 	case TraceDqrProfiler::TCODE_REPEATINSTRUCTION:
 	case TraceDqrProfiler::TCODE_REPEATINSTRUCTION_WS:
 	default:
@@ -6748,6 +6756,8 @@ int ProfilerNexusMessage::getI_Cnt()
 		return indirectHistory.i_cnt;
 	case TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY_WS:
 		return indirectHistoryWS.i_cnt;
+	case TraceDqrProfiler::TCODE_REPEATBRANCH:
+		return repeatBranch.i_cnt;//return (repeatBranch.b_cnt * repeatBranch.i_cnt);
 	case TraceDqrProfiler::TCODE_RESOURCEFULL:
 		if (resourceFull.rCode == 0) {
 			return resourceFull.i_cnt;
@@ -6771,7 +6781,6 @@ int ProfilerNexusMessage::getI_Cnt()
 	case TraceDqrProfiler::TCODE_AUXACCESS_READNEXT:
 	case TraceDqrProfiler::TCODE_AUXACCESS_WRITENEXT:
 	case TraceDqrProfiler::TCODE_AUXACCESS_RESPONSE:
-	case TraceDqrProfiler::TCODE_REPEATBRANCH:
 	case TraceDqrProfiler::TCODE_REPEATINSTRUCTION:
 	case TraceDqrProfiler::TCODE_REPEATINSTRUCTION_WS:
 	case TraceDqrProfiler::TCODE_INCIRCUITTRACE:
@@ -8219,7 +8228,7 @@ void  ProfilerNexusMessage::messageToText(char* dst, size_t dst_len, int level)
 		}
 		break;
 	case TraceDqrProfiler::TCODE_REPEATBRANCH:
-		snprintf(dst + n, dst_len - n, "REPEAT BRANCH (%d)", tcode);
+		snprintf(dst+n,dst_len-n,"REPEAT BRANCH (%d) Branch Repeat Count: %d",tcode, repeatBranch.b_cnt);
 		break;
 	case TraceDqrProfiler::TCODE_REPEATINSTRUCTION:
 		snprintf(dst + n, dst_len - n, "REPEAT INSTRUCTION (%d)", tcode);
@@ -8391,6 +8400,9 @@ void  ProfilerNexusMessage::messageToText(char* dst, size_t dst_len, int level)
 			}
 		}
 		break;
+	case TraceDqrProfiler::TCODE_TRAP_INFO:
+		snprintf(dst+n,dst_len-n,"TRAP INFO (%d) Trap Value: %d",tcode, trapInfo.trap_value);
+		break;
 	case TraceDqrProfiler::TCODE_UNDEFINED:
 		snprintf(dst + n, dst_len - n, "UNDEFINED (%d)", tcode);
 		break;
@@ -8471,6 +8483,9 @@ void ProfilerNexusMessage::dump()
 			std::cout << "  # TraceProfiler Message(" << msgNum << "): Resource Full, Invalid or unsupported rCode for reourceFull TCODE" << std::endl;
 			break;
 		}
+		break;
+	case TraceDqrProfiler::TCODE_REPEATBRANCH:
+		std::cout << "  # Trace Message(" << msgNum << "): Repeat Branch, B-CNT=" << repeatBranch.b_cnt << std::dec << std::endl; // << ", TS=0x" << timestamp << dec;// << endl;
 		break;
 	case TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY:
 		std::cout << "  # TraceProfiler Message(" << msgNum << "): Indirect Branch History, ICNT=" << indirectHistory.i_cnt << ", BTYPE=" << indirectHistory.b_type << ", UADDR=0x" << std::hex << indirectHistory.u_addr << std::dec << ", history=0x" << std::hex << indirectHistory.history << std::dec << std::endl;
@@ -8620,6 +8635,9 @@ void ProfilerNexusMessage::dump()
 		case TraceDqrProfiler::ICT_NONE:
 			break;
 		}
+		break;
+	case TraceDqrProfiler::TCODE_TRAP_INFO:
+		std::cout << "  # Trace Message(" << msgNum << "): Trap Info, TVAL=" << trapInfo.trap_value << std::dec << std::endl; // << ", TS=0x" << timestamp << dec;// << endl;
 		break;
 	default:
 		std::cout << "Error: ProfilerNexusMessage::dump(): Unknown TCODE " << tcode << " (0x" << std::hex << tcode << std::dec << "), msgnum: " << msgNum << std::endl;
@@ -8799,6 +8817,10 @@ TraceDqrProfiler::DQErr Count::setCounts(ProfilerNexusMessage* nm)
 	uint64_t tmp_history = 0;
 	int tmp_taken = 0;
 	int tmp_notTaken = 0;
+	static int prev_i_cnt = 0;
+	static uint64_t prev_history = 0;
+	static int prev_taken = 0;
+	static int prev_notTaken = 0;
 
 	switch (nm->tcode) {
 	case TraceDqrProfiler::TCODE_DEBUG_STATUS:
@@ -8812,6 +8834,7 @@ TraceDqrProfiler::DQErr Count::setCounts(ProfilerNexusMessage* nm)
 	case TraceDqrProfiler::TCODE_AUXACCESS_WRITE:
 	case TraceDqrProfiler::TCODE_INCIRCUITTRACE:
 	case TraceDqrProfiler::TCODE_INCIRCUITTRACE_WS:
+	case TraceDqrProfiler::TCODE_TRAP_INFO:
 		// no counts, do nothing
 		return TraceDqrProfiler::DQERR_OK;
 	case TraceDqrProfiler::TCODE_DIRECT_BRANCH:
@@ -8828,6 +8851,12 @@ TraceDqrProfiler::DQErr Count::setCounts(ProfilerNexusMessage* nm)
 		break;
 	case TraceDqrProfiler::TCODE_INDIRECT_BRANCH_WS:
 		tmp_i_cnt = nm->indirectBranchWS.i_cnt;
+		break;
+	case TraceDqrProfiler::TCODE_REPEATBRANCH:
+		//tmp_i_cnt = prev_i_cnt;
+		//tmp_history = prev_history;
+		//tmp_notTaken = prev_taken;
+		//tmp_taken = prev_notTaken;
 		break;
 	case TraceDqrProfiler::TCODE_RESOURCEFULL:
 		switch (nm->resourceFull.rCode) {
@@ -8872,7 +8901,6 @@ TraceDqrProfiler::DQErr Count::setCounts(ProfilerNexusMessage* nm)
 	case TraceDqrProfiler::TCODE_AUXACCESS_READNEXT:
 	case TraceDqrProfiler::TCODE_AUXACCESS_WRITENEXT:
 	case TraceDqrProfiler::TCODE_AUXACCESS_RESPONSE:
-	case TraceDqrProfiler::TCODE_REPEATBRANCH:
 	case TraceDqrProfiler::TCODE_REPEATINSTRUCTION:
 	case TraceDqrProfiler::TCODE_REPEATINSTRUCTION_WS:
 	case TraceDqrProfiler::TCODE_UNDEFINED:
@@ -8882,6 +8910,7 @@ TraceDqrProfiler::DQErr Count::setCounts(ProfilerNexusMessage* nm)
 		return TraceDqrProfiler::DQERR_ERR;
 	}
 
+	prev_i_cnt = tmp_i_cnt;
 	if (tmp_i_cnt != 0) {
 		rc = setICnt(nm->coreId, tmp_i_cnt);
 		if (rc != TraceDqrProfiler::DQERR_OK) {
@@ -8889,6 +8918,7 @@ TraceDqrProfiler::DQErr Count::setCounts(ProfilerNexusMessage* nm)
 		}
 	}
 
+	prev_history = tmp_history;
 	if (tmp_history != 0) {
 		rc = setHistory(nm->coreId, tmp_history);
 		if (rc != TraceDqrProfiler::DQERR_OK) {
@@ -8896,6 +8926,7 @@ TraceDqrProfiler::DQErr Count::setCounts(ProfilerNexusMessage* nm)
 		}
 	}
 
+	prev_taken = tmp_taken;
 	if (tmp_taken != 0) {
 		rc = setTakenCount(nm->coreId, tmp_taken);
 		if (rc != TraceDqrProfiler::DQERR_OK) {
@@ -8903,6 +8934,7 @@ TraceDqrProfiler::DQErr Count::setCounts(ProfilerNexusMessage* nm)
 		}
 	}
 
+	prev_notTaken = tmp_notTaken;
 	if (tmp_notTaken != 0) {
 		rc = setNotTakenCount(nm->coreId, tmp_notTaken);
 		if (rc != TraceDqrProfiler::DQERR_OK) {
@@ -10760,6 +10792,112 @@ TraceDqrProfiler::DQErr SliceFileParser::parseDataAcquisition(ProfilerNexusMessa
 	return status;
 }
 
+TraceDqrProfiler::DQErr SliceFileParser::parseRepeatBranch(ProfilerNexusMessage&nm,ProfilerAnalytics &analytics)
+{
+	TraceDqrProfiler::DQErr rc;
+	uint64_t   tmp;
+	int        width;
+	int        bits = 6;	// start bits at 6 to account for tcode
+	int        ts_bits = 0;
+	nm.tcode = TraceDqrProfiler::TCODE_REPEATBRANCH;
+	if (srcbits > 0) {
+        rc = parseFixedField(srcbits,&tmp);
+        if (rc != TraceDqrProfiler::DQERR_OK) {
+            status = rc;
+            return status;
+        }
+        bits += srcbits;
+        nm.coreId = (uint8_t)tmp;
+	}
+	else {
+		nm.coreId = 0;
+	}
+	rc = parseVarField(&tmp,&width);
+	if (rc != TraceDqrProfiler::DQERR_OK) {
+		status = rc;
+		return status;
+	}
+	bits += width;
+    nm.repeatBranch.b_cnt = (int)tmp;
+	if (eom == true) {
+		nm.haveTimestamp = false;
+		nm.timestamp = 0;
+	}
+	else {
+		rc = parseVarField(&tmp,&width); // this field is optional - check err
+		if (rc != TraceDqrProfiler::DQERR_OK) {
+			status = rc;
+			return status;
+		}
+		bits += width;
+		ts_bits = width;
+		if (eom != true) {
+			status = TraceDqrProfiler::DQERR_BM;
+			return status;
+		}
+		nm.haveTimestamp = true;
+		nm.timestamp = (TraceDqrProfiler::TIMESTAMP)tmp;
+	}
+	status = analytics.updateTraceInfo(nm,bits+msgSlices*2,msgSlices*2,ts_bits,0);
+	nm.msgNum = analytics.currentTraceMsgNum();
+	return status;
+}
+TraceDqrProfiler::DQErr SliceFileParser::parseTrapInfo(ProfilerNexusMessage &nm,ProfilerAnalytics &analytics)
+{
+	TraceDqrProfiler::DQErr rc;
+	uint64_t   tmp;
+	int        width;
+	int        bits = 6;	// start bits at 6 to account for tcode
+	int        ts_bits = 0;
+	nm.tcode = TraceDqrProfiler::TCODE_TRAP_INFO;
+	if (srcbits > 0) {
+        rc = parseFixedField(srcbits,&tmp);
+        if (rc != TraceDqrProfiler::DQERR_OK) {
+            status = rc;
+            return status;
+        }
+        bits += srcbits;
+        nm.coreId = (uint8_t)tmp;
+	}
+	else {
+		nm.coreId = 0;
+	}
+	rc = parseFixedField(2,&tmp);
+	if (rc != TraceDqrProfiler::DQERR_OK) {
+		status = rc;
+		return status;
+	}
+    bits += 2;
+	rc = parseVarField(&tmp,&width);
+	if (rc != TraceDqrProfiler::DQERR_OK) {
+		status = rc;
+		return status;
+	}
+	bits += width;
+    nm.trapInfo.trap_value = tmp;
+	if (eom == true) {
+		nm.haveTimestamp = false;
+		nm.timestamp = 0;
+	}
+	else {
+		rc = parseVarField(&tmp,&width); // this field is optional - check err
+		if (rc != TraceDqrProfiler::DQERR_OK) {
+			status = rc;
+			return status;
+		}
+		bits += width;
+		ts_bits = width;
+		if (eom != true) {
+			status = TraceDqrProfiler::DQERR_BM;
+			return status;
+		}
+		nm.haveTimestamp = true;
+		nm.timestamp = (TraceDqrProfiler::TIMESTAMP)tmp;
+	}
+	status = analytics.updateTraceInfo(nm,bits+msgSlices*2,msgSlices*2,ts_bits,0);
+	nm.msgNum = analytics.currentTraceMsgNum();
+	return status;
+}
 TraceDqrProfiler::DQErr SliceFileParser::parseFixedField(int width, uint64_t* val)
 {
 	if ((width <= 0) || (val == nullptr)) {
@@ -11496,6 +11634,18 @@ TraceDqrProfiler::DQErr SliceFileParser::readNextTraceMsg(ProfilerNexusMessage& 
 			rc = parseResourceFull(nm, analytics);
 			if (rc != TraceDqrProfiler::DQERR_OK) {
 				std::cout << "Error: parseResourceFull()\n";
+			}
+			break;
+		case TraceDqrProfiler::TCODE_REPEATBRANCH:
+			rc = parseRepeatBranch(nm,analytics);
+			if (rc != TraceDqrProfiler::DQERR_OK) {
+				std::cout << "Error: parseRepeatBranch()\n";
+			}
+			break;
+		case TraceDqrProfiler::TCODE_TRAP_INFO:
+			rc = parseTrapInfo(nm,analytics);
+			if (rc != TraceDqrProfiler::DQERR_OK) {
+				std::cout << "Error: parseTrapInfo()\n";
 			}
 			break;
 		default:

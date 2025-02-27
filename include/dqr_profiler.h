@@ -153,6 +153,7 @@ public:
 		TCODE_CORRELATION = 33,
 		TCODE_INCIRCUITTRACE = 34,
 		TCODE_INCIRCUITTRACE_WS = 35,
+	TCODE_TRAP_INFO               = 56,
 
 		TCODE_UNDEFINED
 	} TCode;
@@ -490,6 +491,10 @@ public:
 			TraceDqrProfiler::SyncReason sync;
 		} indirectHistoryWS;
 		struct {
+    		int	i_cnt;
+    		int	b_cnt;
+    	} repeatBranch;
+    	struct {
 			TraceDqrProfiler::RCode rCode;
 			union {
 				int i_cnt;
@@ -533,6 +538,9 @@ public:
 			uint8_t ckdf;
 			TraceDqrProfiler::ADDRESS ckdata[2];
 		} ictWS;
+    	struct {
+    		uint64_t trap_value;
+    	} trapInfo;
 	};
 	uint32_t size_message = 0;
 	uint32_t offset = 0;
@@ -603,6 +611,7 @@ private:
 		uint32_t num_trace_syncs;
 		uint32_t num_trace_dbranch;
 		uint32_t num_trace_ibranch;
+		uint32_t num_trace_rbranch;
 		uint32_t num_trace_dataacq;
 		uint32_t num_trace_dbranchws;
 		uint32_t num_trace_ibranchws;
@@ -616,6 +625,7 @@ private:
 		uint32_t num_trace_error;
 		uint32_t num_trace_incircuittraceWS;
 		uint32_t num_trace_incircuittrace;
+		uint32_t num_trace_trapinfo;
 
 		uint32_t trace_bits;
 		uint32_t trace_bits_max;
@@ -632,6 +642,7 @@ private:
 		uint32_t trace_bits_sync;
 		uint32_t trace_bits_dbranch;
 		uint32_t trace_bits_ibranch;
+		uint32_t trace_bits_rbranch;
 		uint32_t trace_bits_dataacq;
 		uint32_t trace_bits_dbranchws;
 		uint32_t trace_bits_ibranchws;
@@ -644,6 +655,7 @@ private:
 		uint32_t trace_bits_error;
 		uint32_t trace_bits_incircuittraceWS;
 		uint32_t trace_bits_incircuittrace;
+		uint32_t trace_bits_trapinfo;
 
 		uint32_t num_trace_ts;
 		uint32_t num_trace_uaddr;
@@ -898,6 +910,7 @@ private:
 
 	ProfilerNexusMessage     nm;
 
+	ProfilerNexusMessage     previousNM;
 	ProfilerNexusMessage     messageInfo;
 	ProfilerInstruction      instructionInfo;
 	ProfilerSource           sourceInfo;
