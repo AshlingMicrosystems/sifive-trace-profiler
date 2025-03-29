@@ -835,7 +835,7 @@ public:
 
 	TraceDqrProfiler::DQErr getNumBytesInSWTQ(int& numBytes);
 	TraceDqrProfiler::DQErr GenerateHistogram();
-	void SetHistogramCallback(std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins, int32_t ret)> fp_callback)
+	void SetHistogramCallback(std::function<void(uint32_t src_id, std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins, int32_t ret)> fp_callback)
 	{
 		m_fp_hist_callback = fp_callback;
 	}
@@ -854,6 +854,10 @@ public:
 			m_abort_histogram = true;
 		}
 	}
+	void SetSrcID(uint32_t src_id)
+	{
+		m_src_id = src_id;
+	}
 private:
 	enum state {
 		TRACE_STATE_SYNCCATE,
@@ -867,7 +871,7 @@ private:
 	};
 	std::atomic<uint64_t> m_flush_data_offset;
 	std::unordered_map<uint64_t, uint64_t> m_hist_map;
-	std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins, int32_t ret)> m_fp_hist_callback = nullptr;
+	std::function<void(uint32_t src_id, std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins, int32_t ret)> m_fp_hist_callback = nullptr;
 	TraceDqrProfiler::DQErr        status;
 	TraceDqrProfiler::TraceType	   traceType;
 	class SliceFileParser* sfp;
@@ -924,6 +928,7 @@ private:
 
 	std::mutex m_abort_histogram_mutex;
 	bool m_abort_histogram = false;
+	uint32_t m_src_id = 0;
 
 	TraceDqrProfiler::DQErr configure(class TraceSettings& settings);
 
