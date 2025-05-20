@@ -210,7 +210,7 @@ void SifiveProfilerInterface::SetEndOfDataHistGenerator()
   Date         Initials    Description
   26-Apr-2024  AS          Initial
 ****************************************************************************/
-void SifiveProfilerInterface::SetHistogramCallback(std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins, int32_t ret)> fp_callback)
+void SifiveProfilerInterface::SetHistogramCallback(std::function<void(uint32_t src_id, std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins, int32_t ret)> fp_callback)
 {
     m_fp_hist_callback = fp_callback;
     if (m_hist_trace != NULL)
@@ -264,6 +264,8 @@ TySifiveTraceProfileError SifiveProfilerInterface::PushTraceData(uint8_t *p_buff
             return ret;
         }
     }
+
+    return ret;
 }
 
 /****************************************************************************
@@ -704,6 +706,7 @@ TySifiveTraceProfileError SifiveProfilerInterface::Configure(const TProfilerConf
 	itcPrintChannel = config.itc_print_channel;
     m_port_no = config.portno;
     m_ui_file_split_size_bytes = config.ui_file_split_size_bytes;
+    m_src_id = config.src_id;
 
 	return SIFIVE_TRACE_PROFILER_OK;
 }
@@ -1056,6 +1059,7 @@ TySifiveTraceProfileError SifiveProfilerInterface::StartHistogramThread()
     m_hist_trace->setTraceType(traceType);
     m_hist_trace->setTSSize(tssize);
     m_hist_trace->setPathType(pt);
+    m_hist_trace->SetSrcID(m_src_id);
 
     try
     {

@@ -122,6 +122,7 @@ struct TProfilerConfig
 	uint32_t itc_print_channel = 0;
     uint16_t portno = 6000;
     uint64_t ui_file_split_size_bytes = 8 * 1024;
+	uint32_t src_id = 0;
 };
 
 // Structure to represent the parameters needed for searching
@@ -194,6 +195,7 @@ private:
 	int msgLevel = TySifiveProfilerMsgLogLevel::P_LEVEL_1;			    // Nexus TraceProfiler Msg logging level
 	uint16_t m_port_no = 6000;                                          // Default port
 	uint64_t m_ui_file_split_size_bytes = 8 * 1024;                     // Default UI file size 8KB
+	uint32_t m_src_id = 0;
 
 	// ITC Print Settings
 	int itcPrintOpts = TraceDqrProfiler::ITC_OPT_NLS; // ITC Print Options
@@ -241,7 +243,7 @@ private:
 	std::atomic<bool> m_abort_search;
 
 
-	std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins, int32_t ret)> m_fp_hist_callback = nullptr;
+	std::function<void(uint32_t src_id, std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins, int32_t ret)> m_fp_hist_callback = nullptr;
 
 	virtual TySifiveTraceProfileError ProfilingThread();
 	virtual void CleanUpProfiling();
@@ -268,7 +270,7 @@ public:
 	virtual void WaitForHistogramCompletion();
 	virtual TySifiveTraceProfileError PushTraceDataToHistGenerator(uint8_t* p_buff, const uint64_t& size);
 	virtual void SetEndOfDataHistGenerator();
-	virtual void SetHistogramCallback(std::function<void(std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins, int32_t ret)> fp_callback);
+	virtual void SetHistogramCallback(std::function<void(uint32_t src_id, std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins, int32_t ret)> fp_callback);
 	virtual void ClearHistogram();
 	virtual void SetTraceStartIdx(const uint64_t trace_start_idx);
 	virtual void SetTraceStopIdx(const uint64_t trace_stop_idx);
