@@ -180,6 +180,11 @@ void SifiveProfilerInterface::SetEndOfData()
     {
         m_addr_search_trace->SetEndOfData();
     }
+
+    if (m_ts_search_trace != NULL)
+    {
+        m_ts_search_trace->SetEndOfData();
+    }
 }
 
 /****************************************************************************
@@ -259,6 +264,15 @@ TySifiveTraceProfileError SifiveProfilerInterface::PushTraceData(uint8_t *p_buff
     if (m_addr_search_trace != NULL)
     {
         ret = (m_addr_search_trace->PushTraceData(p_buff, size) == TraceDqrProfiler::DQERR_OK) ? SIFIVE_TRACE_PROFILER_OK : SIFIVE_TRACE_PROFILER_ERR;
+        if (ret != SIFIVE_TRACE_PROFILER_OK)
+        {
+            return ret;
+        }
+    }
+
+    if (m_ts_search_trace != NULL)
+    {
+        ret = (m_ts_search_trace->PushTraceData(p_buff, size) == TraceDqrProfiler::DQERR_OK) ? SIFIVE_TRACE_PROFILER_OK : SIFIVE_TRACE_PROFILER_ERR;
         if (ret != SIFIVE_TRACE_PROFILER_OK)
         {
             return ret;
@@ -668,6 +682,26 @@ void SifiveProfilerInterface::CleanUpHistogram()
 }
 
 /****************************************************************************
+     Function: CleanUpTsSearch
+     Engineer: Arjun Suresh
+        Input: None
+       Output: None
+       return: None
+  Description: CleanUp Function
+  Date         Initials    Description
+2-Nov-2022     AS          Initial
+****************************************************************************/
+void SifiveProfilerInterface::CleanUpTsSearch()
+{
+    if (m_ts_search_trace != nullptr) {
+
+        m_ts_search_trace->cleanUp();
+        delete m_ts_search_trace;
+        m_ts_search_trace = nullptr;
+    }
+}
+
+/****************************************************************************
 	 Function: Configure
 	 Engineer: Arjun Suresh
 		Input: config - Decoder config structure
@@ -1012,6 +1046,27 @@ bool SifiveProfilerInterface::IsSearchAddressFound(TProfAddrSearchOut& addr_loc)
 }
 
 /****************************************************************************
+     Function: IsTsFound
+     Engineer: Arjun Suresh
+        Input: None
+       Output: addr_loc - output of search
+       return: bool
+  Description: Function to check if address is found during search
+  Date         Initials    Description
+  26-Apr-2024  AS          Initial
+****************************************************************************/
+bool SifiveProfilerInterface::IsTsFound(TProfTsSearchOut& addr_loc)
+{
+    std::lock_guard<std::mutex> m_search_addr_guard(m_search_ts_mutex);
+    addr_loc.ts_found = m_ts_search_out.ts_found;
+    addr_loc.msg_num = m_ts_search_out.msg_num;
+    addr_loc.ui_file_idx = m_ts_search_out.ui_file_idx;
+    addr_loc.ins_pos = m_ts_search_out.ins_pos;
+
+    return m_ts_search_out.ts_found;
+}
+
+/****************************************************************************
      Function: WaitForSymbolSearchCompletion
      Engineer: Arjun Suresh
         Input: None
@@ -1134,6 +1189,7 @@ SifiveProfilerInterface::~SifiveProfilerInterface()
     CleanUpProfiling();
     CleanUpAddrSearch();
     CleanUpHistogram();
+    CleanUpTsSearch();
 }
 
 /****************************************************************************
@@ -1200,4 +1256,147 @@ void SifiveProfilerInterface::AbortSearch()
         m_addr_search_trace->SetEndOfData();
     m_abort_search = true;
     WaitForAddrSearchCompletion();
+}
+
+TySifiveTraceProfileError SifiveProfilerInterface::StartTsSearchThread(TProfTsSearchParams& search_params)
+{
+    m_ts_search_trace = new (std::nothrow) TraceProfiler(tf_name, ef_name, numAddrBits, addrDispFlags, srcbits, od_name, freq);
+    if (m_ts_search_trace == nullptr)
+    {
+        LOG_ERR("Could not create Trace Profiler instance");
+        CleanUpTsSearch();
+        return SIFIVE_TRACE_PROFILER_MEM_CREATE_ERR;
+    }
+
+    if (m_ts_search_trace->getStatus() != TraceDqrProfiler::DQERR_OK)
+    {
+        LOG_ERR("Trace Profiler Status Error");
+        CleanUpHistogram();
+        return SIFIVE_TRACE_PROFILER_TRACE_STATUS_ERROR;
+    }
+
+    m_ts_search_trace->setTraceType(traceType);
+    m_ts_search_trace->setTSSize(tssize);
+    m_ts_search_trace->setPathType(pt);
+    m_ts_search_trace->SetSrcID(m_src_id);
+
+    try
+    {
+        m_ts_search_thread = std::thread(&SifiveProfilerInterface::TsSearchThread, this, std::ref(search_params));
+    }
+    catch (...)
+    {
+        return SIFIVE_TRACE_PROFILER_ERR;
+    }
+
+    return SIFIVE_TRACE_PROFILER_OK;
+}
+
+TySifiveTraceProfileError SifiveProfilerInterface::TsSearchThread(TProfTsSearchParams& search_params)
+{
+    uint64_t address_out = 0;
+    uint64_t prev_addr = 0;
+    uint64_t inst_cnt = 0;
+    uint64_t msg_num = 0;
+    uint64_t cum_msg_num = 0;
+    ProfilerInstruction* instInfo = nullptr;
+    ProfilerNexusMessage* nm = nullptr;
+
+    {
+        std::lock_guard<std::mutex> m_search_addr_guard(m_search_ts_mutex);
+        m_ts_search_out.ts_found = false;
+        m_ts_search_out.msg_num = 0;
+        m_ts_search_out.ui_file_idx = 0;
+        m_ts_search_out.ins_pos = 0;
+    }
+
+    // Search always starts one file behind the search_params.start_ui_file_idx value. This is to ensure that the profiler
+    // gets a sync point to start decoding. We ingore the data from the previous file.
+    uint64_t curr_ui_file_idx =  ((search_params.ui_file_idx <= 1) ? search_params.ui_file_idx : (search_params.ui_file_idx - 1));
+    uint64_t byte_offset = search_params.byte_offset;
+    if (search_params.ui_file_idx > 1)
+    {
+        std::lock_guard<std::mutex> m_flush_data_offsets_guard(m_flush_data_offsets_mutex);
+        if (m_flush_data_offsets.size() > 0)
+        {
+            // Get the offet at which flush was called
+            uint64_t offset = m_flush_data_offsets.front();
+            byte_offset += offset;
+        }
+    }
+
+    // Loop through the decoded instructions
+    while (m_ts_search_trace->NextInstruction(&instInfo, &nm, address_out) == TraceDqrProfiler::DQERR_OK)
+    {
+        if (m_abort_search)
+        {
+            return SIFIVE_TRACE_PROFILER_OK;
+        }
+
+        {
+            // Check if flush data is called. This gives us info about the bounday of an encoded file
+            std::lock_guard<std::mutex> m_flush_data_offsets_guard(m_flush_data_offsets_mutex);
+            if (m_flush_data_offsets.size() > 0)
+            {
+                // Get the offet at which flush was called
+                uint64_t offset = m_flush_data_offsets.front();
+                // If the profiler has exceeded decoding that offset
+                if (nm->offset >= offset)
+                {
+                    // Remove the offset from the vector
+                    m_flush_data_offsets.pop_front();
+                    // Set the current instruction count to 0
+                    inst_cnt = 0;
+                    msg_num = 0;
+
+                    cum_msg_num += (nm->msgNum > 0) ? (nm->msgNum - 1) : 0;
+                    // Update the UI file idx
+                    curr_ui_file_idx++;
+                }
+            }
+        }
+
+       // printf("\n\n\nMsg Number : %d\n", nm->msgNum - cum_msg_num);
+
+
+        if (address_out != prev_addr)
+        {
+            // If we get a new address, increment the ins count
+            inst_cnt++;
+            prev_addr = address_out;
+        }
+        
+        // Check if the address is an exact match
+        if (nm->haveTimestamp && (search_params.ts_value == nm->timestamp))
+        {
+            {
+                std::lock_guard<std::mutex> m_search_addr_guard(m_search_ts_mutex);
+                m_ts_search_out.ts_found = true;
+                m_ts_search_out.msg_num = nm->msgNum - cum_msg_num;
+                m_ts_search_out.ui_file_idx = curr_ui_file_idx;
+                m_ts_search_out.ins_pos = inst_cnt;
+            }
+            return SIFIVE_TRACE_PROFILER_OK;
+        }
+
+    }
+
+    return SIFIVE_TRACE_PROFILER_OK;
+}
+
+/****************************************************************************
+     Function: WaitForTsSearchCompletion
+     Engineer: Arjun Suresh
+        Input: None
+       Output: None
+       return: None
+  Description: Wait for Ts Search Thread completion
+  Date         Initials    Description
+  26-Apr-2024  AS          Initial
+****************************************************************************/
+void SifiveProfilerInterface::WaitForTsSearchCompletion()
+{
+    if (m_ts_search_thread.joinable())
+        m_ts_search_thread.join();
+    CleanUpTsSearch();
 }

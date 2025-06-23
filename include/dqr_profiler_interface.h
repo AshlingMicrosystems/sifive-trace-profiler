@@ -138,11 +138,26 @@ struct TProfAddrSearchParams
 	bool search_within_range;               // If set to true, search will return an address which satisfies (addr >= addr_start && addr_start < address_end), else search will return position of addr_start.
 };
 
+struct TProfTsSearchParams
+{
+	uint64_t ts_value;						// Starting address of the search range
+	uint64_t byte_offset;
+	uint64_t ui_file_idx;             // Search will begin from this UI idx. This idx is inclusive.
+};
+
 // Structure to represent location of an address in the decoded trace data
 struct TProfAddrSearchOut
 {
 	bool addr_found = false;
 	uint64_t ui_file_idx = 0;
+	uint64_t ins_pos = 0;
+};
+
+struct TProfTsSearchOut
+{
+	bool ts_found = false;
+	uint64_t ui_file_idx = 0;
+	uint64_t msg_num = 0;
 	uint64_t ins_pos = 0;
 };
 
@@ -216,10 +231,12 @@ private:
 	TraceProfiler* m_profiling_trace = nullptr;
 	TraceProfiler* m_addr_search_trace = nullptr;
 	TraceProfiler* m_hist_trace = nullptr;
+	TraceProfiler* m_ts_search_trace = nullptr;
 	SocketIntf* m_client = nullptr;
 	std::thread m_profiling_thread;
 	std::thread m_addr_search_thread;
 	std::thread m_hist_thread;
+	std::thread m_ts_search_thread;
 	uint64_t* mp_buffer = nullptr;
 	uint32_t m_thread_idx = 0;
 	std::function<void(uint64_t, bool)> m_fp_cum_ins_cnt_callback = nullptr;  // Funtion pointer to set callback
@@ -227,6 +244,7 @@ private:
 	std::mutex m_flush_data_offsets_mutex;                                    // Mutex for synchronization
 	std::mutex m_buffer_data_mutex;											  // Mutex for synchronization
 	std::mutex m_search_addr_mutex;										      // Mutex for synchronization
+	std::mutex m_search_ts_mutex;										      // Mutex for synchronization
 	std::mutex m_wait_for_search_complete_mutex;							  // Mutex for synchronization
 
 	bool m_flush_socket_data = false;
@@ -236,6 +254,7 @@ private:
 	bool m_abort_profiling = false;
 
 	TProfAddrSearchOut m_addr_search_out;
+	TProfTsSearchOut m_ts_search_out;
 
 	uint64_t m_trace_start_idx = 0;
 	uint64_t m_trace_stop_idx = UINT64_MAX;
@@ -249,6 +268,7 @@ private:
 	virtual void CleanUpProfiling();
 	virtual void CleanUpAddrSearch();
 	virtual void CleanUpHistogram();
+	virtual void CleanUpTsSearch();
 	virtual bool WaitforACK();
 	virtual TySifiveTraceProfileError FlushDataOverSocket();
 public:
@@ -265,6 +285,7 @@ public:
 	virtual TySifiveTraceProfileError StartAddrSearchThread(const TProfAddrSearchParams& search_params, const TProfAddrSearchDir& dir);
 	virtual TySifiveTraceProfileError AddrSearchThread(const TProfAddrSearchParams& search_params, const TProfAddrSearchDir& dir);
 	virtual bool IsSearchAddressFound(TProfAddrSearchOut& addr_out);
+	virtual bool IsTsFound(TProfTsSearchOut& ts_loc);
 	virtual TySifiveTraceProfileError StartHistogramThread();
 	virtual TySifiveTraceProfileError HistogramThread();
 	virtual void WaitForHistogramCompletion();
@@ -276,6 +297,9 @@ public:
 	virtual void SetTraceStopIdx(const uint64_t trace_stop_idx);
 	virtual void AbortHistogramThread();
 	virtual void AbortSearch();
+	virtual TySifiveTraceProfileError StartTsSearchThread(TProfTsSearchParams& search_params);
+	virtual TySifiveTraceProfileError TsSearchThread(TProfTsSearchParams& search_params);
+	virtual void WaitForTsSearchCompletion();
 };
 
 // Function pointer typedef
