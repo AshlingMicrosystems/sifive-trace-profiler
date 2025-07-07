@@ -342,6 +342,18 @@ TySifiveTraceProfileError SifiveProfilerInterface::FlushDataOverSocket()
     uint32_t max_size = 0;
     uint8_t* msg_packet = msg.GetPacketToSend(&max_size);
 
+    if (m_client == NULL)
+    {
+        LOG_ERR("Client is NULL");
+        return SIFIVE_TRACE_PROFILER_ERR;
+    }
+
+    if (mp_buffer == NULL)
+    {
+        LOG_ERR("mp_buffer is NULL");
+        return SIFIVE_TRACE_PROFILER_ERR;
+    }
+
     LOG_DEBUG("Sending Size Packet");
     int32_t send_bytes = m_client->write(msg_packet, max_size);
     if (send_bytes <= 0)
