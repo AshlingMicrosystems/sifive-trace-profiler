@@ -1272,6 +1272,7 @@ void SifiveProfilerInterface::AbortSearch()
 
 TySifiveTraceProfileError SifiveProfilerInterface::StartTsSearchThread(TProfTsSearchParams& search_params)
 {
+    m_abort_search = false;
     m_ts_search_trace = new (std::nothrow) TraceProfiler(tf_name, ef_name, numAddrBits, addrDispFlags, srcbits, od_name, freq);
     if (m_ts_search_trace == nullptr)
     {
@@ -1342,6 +1343,7 @@ TySifiveTraceProfileError SifiveProfilerInterface::TsSearchThread(TProfTsSearchP
     {
         if (m_abort_search)
         {
+            LOG_INFO("Aborting search");
             return SIFIVE_TRACE_PROFILER_OK;
         }
 
