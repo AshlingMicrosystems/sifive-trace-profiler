@@ -259,7 +259,7 @@ private:
 	uint64_t m_trace_start_idx = 0;
 	uint64_t m_trace_stop_idx = UINT64_MAX;
 
-	std::atomic<bool> m_abort_search;
+	std::atomic<bool> m_abort_search{false};
 
 
 	std::function<void(uint32_t src_id, std::unordered_map<uint64_t, uint64_t>& hist_map, uint64_t total_bytes_processed, uint64_t total_ins, int32_t ret)> m_fp_hist_callback = nullptr;
