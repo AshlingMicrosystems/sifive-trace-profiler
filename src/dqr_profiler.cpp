@@ -2537,187 +2537,97 @@ ObjDump::objDumpTokenType ObjDump::getRestOfLine(char* lex)
 	return odtt_eol;
 }
 
-TraceDqrProfiler::DQErr ObjDump::parseFileOrLabelOrDisassembly(line_t& lineType, char* text, int& length, uint32_t& value)
+TraceDqrProfiler::DQErr ObjDump::parseFileOrLabelOrDisassembly(line_t &lineType, char *text, int &length, uint32_t &value)
 {
-	objDumpTokenType type;
-	char lex[256];
-	uint64_t n;
+    objDumpTokenType type = odtt_error;
+    char lex[256] = {0};
 
-	// already have hex number
+    type = getNextLex(lex);
 
-	//	could be:
-	//
-	// 2  address '<' label '>' ':'				<- Hstring '<' string '>' ':' EOL
-	//
-	// 3  address ':' instruction disassembly	<- Hstring ':' Hstring string2end EOL
-	//
-	// 4  drive ':' path-file ':' line			<- [H]string ':' string ':' Dstring EOL
-	//
-	// 5  name '(' ')' ':'						<- string '(' ')' ':' EOL
-
-	type = getNextLex(lex);
-
-	if (type == odtt_lt) {
-		// case 2: address '<' label '>' ':'
-
-		lineType = line_t_label;
-
-		type = getNextLex(text);
-		if (type != odtt_string) {
-			printf("Error: parseFileOrLabelOrDisassembly(): expected label\n");
-			return TraceDqrProfiler::DQERR_ERR;
-		}
-
-		type = getNextLex(lex);
-		if (type != odtt_gt) {
-			printf("Error: parseFileOrLabelOrDisassembly(): expected '>'\n");
-			return TraceDqrProfiler::DQERR_ERR;
-		}
-
-		type = getNextLex(lex);
-		if (type != odtt_colon) {
-			printf("Error: parseFileOrLabelOrDisassembly(): expected ':'\n");
-			return TraceDqrProfiler::DQERR_ERR;
-		}
-
-		type = getNextLex(lex);
-	}
-	else if (type == odtt_lp) {
-		// case 5: name '(' ')' ':'
-
-		lineType = line_t_func;
-
-		type = getNextLex(lex);
-		if (type != odtt_rp) {
-			printf("Error: parseFileOrLabelOrDisassembly(): expected ')'\n");
-			return TraceDqrProfiler::DQERR_ERR;
-		}
-
-		type = getNextLex(lex);
-		if (type != odtt_colon) {
-			printf("Error: parseFileOrLabelOrDisassembly(): expected ':'\n");
-			return TraceDqrProfiler::DQERR_ERR;
-		}
-
-		type = getNextLex(lex);
-	}
+    if (type == odtt_lt) {
+        // address '<' label '>' ':'
+        lineType = line_t_label;
+        if (getNextLex(text) != odtt_string) return TraceDqrProfiler::DQERR_ERR;
+        if (getNextLex(lex) != odtt_gt)      return TraceDqrProfiler::DQERR_ERR;
+        if (getNextLex(lex) != odtt_colon)   return TraceDqrProfiler::DQERR_ERR;
+        return TraceDqrProfiler::DQERR_OK;
+    }
+    else if (type == odtt_lp) {
+        // name '(' ')' ':'
+        lineType = line_t_func;
+        if (getNextLex(lex) != odtt_rp)      return TraceDqrProfiler::DQERR_ERR;
+        if (getNextLex(lex) != odtt_colon)   return TraceDqrProfiler::DQERR_ERR;
+        return TraceDqrProfiler::DQERR_OK;
+    }
 	else if (type == odtt_colon) {
-		// need to look further to figure out what we have
-
-		type = getNextLex(text);
-		if (type != odtt_string) {
-			printf("Error: parseFileOrLabelOrDisassembly(): Expected instruction or path\n");
+		// Grab the entire remainder of the line (keeps spaces)
+		char rest[1024];
+		objDumpTokenType rt = getRestOfLine(rest);
+		if (rt != odtt_eol && rt != odtt_eof) {
+			printf("Error: parseFileOrLabelOrDisassembly(): could not read rest of line\n");
 			return TraceDqrProfiler::DQERR_ERR;
 		}
 
-		if (isStringAHexNumber(text, n) == false) {
-			// have a filepath:line
+		// Trim leading whitespace
+		char *p = rest;
+		while (*p == ' ' || *p == '\t') ++p;
 
-			lineType = line_t_path;
-
-			type = getNextLex(lex);
-			if (type != odtt_colon) {
-				printf("Error: parseFileOrLabelOrDisassembly(): Expected ':'\n");
-				return TraceDqrProfiler::DQERR_ERR;
-			}
-
-			type = getNextLex(lex);
-			if (type != odtt_string) {
-				printf("Error: parseFileOrLabelOrDisassembly(): Expected line number\n");
-				return TraceDqrProfiler::DQERR_ERR;
-			}
-
-			if (isStringADecNumber(lex, n) == false) {
-				// this might be a weird objdump double path (thank you objdump - NOT).
-
-				// Discard text and copy lex to text
-				strcpy(text, lex);
-
-				type = getNextLex(lex);
-				if (type != odtt_colon) {
-					printf("Error: parseFileOrLabelOrDisassembly(): Expected line number after double path\n");
-					return TraceDqrProfiler::DQERR_ERR;
-				}
-
-				// need to get the line number
-
-				type = getNextLex(lex);
-				if (type != odtt_string) {
-					printf("Error: parseFileOrLabelOrDisassembly(): Expected line number\n");
-					return TraceDqrProfiler::DQERR_ERR;
-				}
-
-				if (isStringADecNumber(lex, n) == false) {
-					printf("Error: parseFileOrLabelOrDisassembly(): Expected line number\n");
-					return TraceDqrProfiler::DQERR_ERR;
-				}
-			}
-
-			value = (uint32_t)n;
-
-			// see if we have '(' discriminator n ')'
-
-			type = getNextLex(lex);
-			if (type == odtt_lp) {
-				type = getNextLex(lex);
-				if (type != odtt_string) {
-					printf("Error: parseFileOrLabelOrDisassembly(): Expected discriminator\n");
-					return TraceDqrProfiler::DQERR_ERR;
-				}
-
-				type = getNextLex(lex);
-				if (type != odtt_string) {
-					printf("Error: parseFileOrLabelOrDisassembly(): Expected discriminator number\n");
-					return TraceDqrProfiler::DQERR_ERR;
-				}
-
-				type = getNextLex(lex);
-				if (type != odtt_rp) {
-					printf("Error: parseFileOrLabelOrDisassembly(): Expected discriminator ')'\n");
-					return TraceDqrProfiler::DQERR_ERR;
-				}
-
-				type = getNextLex(lex);
-			}
-		}
-		else {
-			//  have a disassembly line
-
+		// --- Case A: disassembly (hex opcode at start) ---
+		int hexDigits = 0;
+		while (isxdigit((unsigned char)p[hexDigits])) ++hexDigits;
+		if ((hexDigits == 4 || hexDigits == 8) &&
+			(p[hexDigits] == 0 || isspace((unsigned char)p[hexDigits]))) {
 			lineType = line_t_diss;
+			length   = (hexDigits == 4) ? 16 : 32;
 
-			value = (uint32_t)n;
+			uint64_t v = 0;
+			for (int i = 0; i < hexDigits; i++)
+				v = (v << 4) | atoh(p[i]);
+			value = (uint32_t)v;
 
-			int len;
-			len = strlen(text);
-
-			if (len == 4) {
-				length = 16;
-			}
-			else if (len == 8) {
-				length = 32;
-			}
-			else {
-				printf("Error: pareFileOrLabelOrDisassembly(): Invalid instruction (%s,%d)\n", text, len);
-				return TraceDqrProfiler::DQERR_ERR;
-			}
-
-			type = getRestOfLine(text);
-			if ((type == odtt_eof) || (type == odtt_eol)) {
-				return TraceDqrProfiler::DQERR_OK;
-			}
+			// Skip opcode, then copy the rest as mnemonic+operands
+			p += hexDigits;
+			while (*p == ' ' || *p == '\t') ++p;
+			strncpy(text, p, 255);
+			text[255] = 0;
+			return TraceDqrProfiler::DQERR_OK;
 		}
-	}
-	else {
-		printf("Error: parseFileOrLabelOrDisassembly(): Unexpected input (%d, %s, %s)\n", type, text, lex);
-		return TraceDqrProfiler::DQERR_ERR;
+
+		// --- Case B: file path with spaces ---
+		char *lastColon = strrchr(p, ':');
+		if (!lastColon) {
+			printf("Error: parseFileOrLabelOrDisassembly(): expected ':' before line number\n");
+			return TraceDqrProfiler::DQERR_ERR;
+		}
+		*lastColon = 0;
+		char *lineno = lastColon + 1;
+
+		// Trim whitespace before line number
+		while (*lineno == ' ' || *lineno == '\t') ++lineno;
+
+		// Extract just the decimal digits (ignore discriminator suffix)
+		char numbuf[64];
+		int i = 0;
+		while (*lineno && isdigit((unsigned char)*lineno) && i < (int)sizeof(numbuf)-1) {
+			numbuf[i++] = *lineno++;
+		}
+		numbuf[i] = 0;
+
+		uint64_t n = 0;
+		if (!isStringADecNumber(numbuf, n)) {
+			printf("Error: parseFileOrLabelOrDisassembly(): invalid line number\n");
+			return TraceDqrProfiler::DQERR_ERR;
+		}
+
+		lineType = line_t_path;
+		value    = (uint32_t)n;
+		strncpy(text, p, 255);
+		text[255] = 0;
+		return TraceDqrProfiler::DQERR_OK;
 	}
 
-	if ((type != odtt_eol) && (type != odtt_eof)) {
-		printf("Error: parseFileOrLabelOrDisassembly(): Expected EOL\n");
-		return TraceDqrProfiler::DQERR_ERR;
-	}
-
-	return TraceDqrProfiler::DQERR_OK;
+	printf("Error: parseFileOrLabelOrDisassembly(): unexpected token type %d\n", type);
+    return TraceDqrProfiler::DQERR_ERR;
 }
 
 TraceDqrProfiler::DQErr ObjDump::parseFileLine(uint32_t& line)
