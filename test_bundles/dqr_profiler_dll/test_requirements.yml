@@ -1,0 +1,17 @@
+# Test Details Configuration
+#
+# This file defines the repositories and components that need to be cloned and built
+# for conducting each automated test in the GitLab CI pipeline.
+
+tests:
+
+  # ----- UNIT TESTS -----
+  unit_tests:
+    SiFive_profiler_library_test:
+      repositories:
+        - name: sifive_trace_profiler
+          components:
+            - name: dqr_profiler_dll
+
+  # ----- INTEGRATION TESTS -----
+  integration_tests:
