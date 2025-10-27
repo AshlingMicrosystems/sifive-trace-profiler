@@ -5,13 +5,26 @@
 
 tests:
 
-  # ----- UNIT TESTS -----
-  unit_tests:
-    SiFive_profiler_library_test:
-      repositories:
-        - name: sifive_trace_profiler
-          components:
-            - name: dqr_profiler_dll
+ #------------------------------------ SOFTWARE TESTS ------------------------------------
+  software:
 
-  # ----- INTEGRATION TESTS -----
-  integration_tests:
+    # ----- UNIT TESTS -----
+    unit:
+
+      SiFive_profiler_library_test:
+        repositories:
+          - name: sifive-trace-profiler
+            components:
+              - dqr_profiler_dll
+
+    # ----- INTEGRATION TESTS -----
+    integration:
+
+ #------------------------------------ HARDWARE TESTS ------------------------------------
+  hardware:
+
+    # ----- UNIT TESTS -----
+    unit:
+
+    # ----- INTEGRATION TESTS -----
+    integration:
