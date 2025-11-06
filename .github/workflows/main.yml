@@ -1,0 +1,61 @@
+name: Sifive Trace Profiler CI
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+  workflow_dispatch:    # 👈 Allows manual/API triggers (e.g. from GitLab)
+
+jobs:
+  build-sifive-profiler:
+    name: Build Sifive Trace Profiler
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build Sifive Profiler
+      run: |
+        echo "Building Sifive Profiler"
+        echo "Current directory:"
+        pwd
+        echo "Directory contents:"
+        ls -la
+        echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
+
+        # Navigate to Sifive Trace Profiler build directory
+        cd "$GITHUB_WORKSPACE/project/linux"
+        echo "Changed to Sifive Profiler directory:"
+        pwd
+
+        # Clean and build binaries
+        make clean -f makefile CFG=Release
+        make -f makefile CFG=Release ARCH=64 all
+
+    - name: Prepare artifacts
+      run: |
+        echo "Preparing Sifive Profiler artifacts..."
+        echo "Current directory:"
+        pwd
+
+        # Verify build output exists
+        if [ ! -f "$GITHUB_WORKSPACE/project/linux/Release/libdqr_profiler.so" ]; then
+          echo "❌ libdqr_profiler.so not found!"
+          exit 1
+        fi
+
+        # Create artifacts directory
+        mkdir -p "$GITHUB_WORKSPACE/artifacts/SifiveProfiler"
+
+        # Copy the built library
+        cp "$GITHUB_WORKSPACE/project/linux/Release/libdqr_profiler.so" \
+           "$GITHUB_WORKSPACE/artifacts/SifiveProfiler/libdqr_profiler.so"
+
+        echo "✅ Sifive Profiler artifacts prepared successfully."
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: SifiveProfiler-libs       # 👈 Artifact name for GitLab or downstream jobs
+        path: ${{ github.workspace }}/artifacts/SifiveProfiler/
