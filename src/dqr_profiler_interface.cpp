@@ -563,14 +563,14 @@ TySifiveTraceProfileError SifiveProfilerInterface::ProfilingThread()
     fclose(fp);
 #endif
 
-#if TRANSFER_DATA_OVER_SOCKET == 1
-    if (m_client)
-    {
-        m_client->close();
-        delete m_client;
-        m_client = nullptr;
-    }
-#endif
+    // NOTE: The socket is deliberately NOT closed/deleted here. Other threads
+    // (e.g. the trace fetch/load thread calling AddFlushDataOffset) can be inside
+    // FlushDataOverSocket at this point, and this thread can reach here at any
+    // time via a decode error, the trace stop idx or an abort. Tearing the socket
+    // down from here races with those callers and results in a NULL/dangling
+    // m_client being dereferenced in WaitforACK.
+    // Ownership belongs to CleanUpProfiling(), which WaitForProfilerCompletion()
+    // invokes only after this thread has been joined.
     LOG_DEBUG("Exiting Profiling Thread");
     return SIFIVE_TRACE_PROFILER_OK;
 }
@@ -589,6 +589,16 @@ bool SifiveProfilerInterface::WaitforACK()
 {
     uint32_t maxSize = 64;
     uint8_t buff[64] = { 0 };
+
+    // The caller may have validated m_client before entering here, but that
+    // check is not sufficient on its own since m_client is shared state. Re-check
+    // so that a torn down socket is reported as an ACK error instead of
+    // dereferencing a NULL pointer.
+    if (m_client == NULL)
+    {
+        LOG_ERR("Client is NULL");
+        return false;
+    }
 
     LOG_DEBUG("Waiting For ACK");
     int32_t recvSize = m_client->read(buff, &maxSize);
@@ -630,18 +640,26 @@ void SifiveProfilerInterface::CleanUpProfiling()
 {
 #if TRANSFER_DATA_OVER_SOCKET == 1
     LOG_DEBUG("Closing socket");
-    if (m_client)
     {
-        m_client->close();
-        delete m_client;
-        m_client = nullptr;
+        // Serialise against FlushDataOverSocket(), which is driven by the
+        // fetch/load thread through AddFlushDataOffset()
+        std::lock_guard<std::mutex> m_buffer_data_mutex_guard(m_buffer_data_mutex);
+        if (m_client)
+        {
+            m_client->close();
+            delete m_client;
+            m_client = nullptr;
+        }
     }
 #endif
     LOG_DEBUG("Deleting Socket Buffer");
-    if (mp_buffer)
     {
-        delete[] mp_buffer;
-        mp_buffer = nullptr;
+        std::lock_guard<std::mutex> m_buffer_data_mutex_guard(m_buffer_data_mutex);
+        if (mp_buffer)
+        {
+            delete[] mp_buffer;
+            mp_buffer = nullptr;
+        }
     }
 
     LOG_DEBUG("Trace Class Clenup");
