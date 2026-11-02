@@ -4142,6 +4142,54 @@ void TraceProfiler::SetEndOfData()
        sfp->SetEndOfData();
 }
 
+// History bits keep a walk going even when the I-CNT has run out, since a HIST-full ResourceFull
+// message carries no I-CNT. A message that does carry one ends where it runs out, so bits still
+// left then mean the trace does not match the program (e.g. bits lost by the encoder), and so does
+// a walk on history alone longer than any I-CNT (22 bits, NTRACE_MAX_ICNT in the N-Trace spec).
+// Without this check, a loop with no conditional branch, such as "j .", is walked forever.
+// Returns true, with the next state set, when the walk of the current message has to end: an
+// IndirectBranchHist's address is still right, so it carries on from there; any other message
+// restarts at the next sync.
+
+bool TraceProfiler::endRunawayWalk()
+{
+	if (counts->getCurrentCountType(currentCore) != TraceDqrProfiler::COUNTTYPE_history) {
+		return false;
+	}
+
+	bool msgHasICnt = (nm.tcode != TraceDqrProfiler::TCODE_RESOURCEFULL) || (nm.resourceFull.rCode == 0);
+	int icnt = counts->getICnt(currentCore);
+
+	if ((!msgHasICnt || (icnt > 0)) && (icnt >= -(1 << 22))) {
+		return false;
+	}
+
+	counts->resetCounts(currentCore);
+
+	if ((nm.tcode == TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY) || (nm.tcode == TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY_WS)) {
+		state[currentCore] = TRACE_STATE_RETIREMESSAGE;
+	}
+	else {
+		state[currentCore] = TRACE_STATE_GETFIRSTSYNCMSG;
+	}
+
+	return true;
+}
+
+// For when the history runs out at a conditional branch with I-CNT left. Only an I-CNT-full
+// ResourceFull may leave branches for a later message. A message with history carries the outcome
+// of every branch in its I-CNT, so then the trace does not match the program, and the I-CNT left
+// over must not be carried into the next message.
+
+void TraceProfiler::dropLeftoverCounts()
+{
+	if ((nm.tcode == TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY) ||
+	    (nm.tcode == TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY_WS) ||
+	    ((nm.tcode == TraceDqrProfiler::TCODE_CORRELATION) && (nm.correlation.cdf == 1))) {
+		counts->resetCounts(currentCore);
+	}
+}
+
 TraceDqrProfiler::DQErr TraceProfiler::processTraceMessage(ProfilerNexusMessage& nm, TraceDqrProfiler::ADDRESS& pc, TraceDqrProfiler::ADDRESS& faddr, TraceDqrProfiler::TIMESTAMP& ts, bool& consumed)
 {
 	consumed = false;
@@ -5754,6 +5802,10 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 				break;
 			}
 
+			if (endRunawayWalk()) {
+				break;
+			}
+
 			addr = currentAddress[currentCore];
 			address_out = addr;
 			uint32_t inst;
@@ -5839,6 +5891,8 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 
 			if (addr == (TraceDqrProfiler::ADDRESS)-1) {
 				if (brFlags == TraceDqrProfiler::BRFLAG_unknown) {
+					dropLeftoverCounts();
+
 					// read another trace message and retry
 
 					state[currentCore] = TRACE_STATE_RETIREMESSAGE;
@@ -7239,6 +7293,10 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 				break;
 			}
 
+			if (endRunawayWalk()) {
+				break;
+			}
+
 			//			printf("state TRACE_STATE_GETNEXTINSTRUCTION\n");
 
 						// Should first process addr, and then compute next addr!!! If can't compute next addr, it is an error.
@@ -7328,6 +7386,8 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 
 			if (addr == (TraceDqrProfiler::ADDRESS)-1) {
 				if (brFlags == TraceDqrProfiler::BRFLAG_unknown) {
+					dropLeftoverCounts();
+
 					// read another trace message and retry
 
 					state[currentCore] = TRACE_STATE_RETIREMESSAGE;
@@ -7794,6 +7854,11 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 			}
 			while (1)
 			{
+				if (endRunawayWalk())
+				{
+					break;
+				}
+
 				addr = currentAddress[currentCore];
 				uint64_t address_out = (addr);
 
@@ -7826,6 +7891,7 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 				{
 					if (brFlags == TraceDqrProfiler::BRFLAG_unknown)
 					{
+						dropLeftoverCounts();
 						state[currentCore] = TRACE_STATE_RETIREMESSAGE;
 						break;
 					}
