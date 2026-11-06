@@ -4149,7 +4149,8 @@ void TraceProfiler::SetEndOfData()
 // Without this check, a loop with no conditional branch, such as "j .", is walked forever.
 // Returns true, with the next state set, when the walk of the current message has to end: an
 // IndirectBranchHist's address is still right, so it carries on from there; any other message
-// restarts at the next sync.
+// restarts at the next sync. The walk did not follow the program, so the return addresses on the
+// stack may not apply after it and are dropped too.
 
 bool TraceProfiler::endRunawayWalk()
 {
@@ -4165,6 +4166,7 @@ bool TraceProfiler::endRunawayWalk()
 	}
 
 	counts->resetCounts(currentCore);
+	counts->resetStack(currentCore);
 
 	if ((nm.tcode == TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY) || (nm.tcode == TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY_WS)) {
 		state[currentCore] = TRACE_STATE_RETIREMESSAGE;
@@ -4179,7 +4181,8 @@ bool TraceProfiler::endRunawayWalk()
 // For when the history runs out at a conditional branch with I-CNT left. Only an I-CNT-full
 // ResourceFull may leave branches for a later message. A message with history carries the outcome
 // of every branch in its I-CNT, so then the trace does not match the program, and the I-CNT left
-// over must not be carried into the next message.
+// over must not be carried into the next message. Nor must the return addresses on the stack,
+// which may not apply after the message's address.
 
 void TraceProfiler::dropLeftoverCounts()
 {
@@ -4187,6 +4190,44 @@ void TraceProfiler::dropLeftoverCounts()
 	    (nm.tcode == TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY_WS) ||
 	    ((nm.tcode == TraceDqrProfiler::TCODE_CORRELATION) && (nm.correlation.cdf == 1))) {
 		counts->resetCounts(currentCore);
+		counts->resetStack(currentCore);
+	}
+}
+
+// For when the walk reaches a jump through a register it cannot follow (e.g. a return with the
+// stack empty) with counts left. A message that reports a jump through a register carries that
+// jump's target, so this earlier jump was left out of the trace (e.g. a return the encoder did not
+// report). Returns true when the walk can carry on from the message's target: the counts are
+// dropped, and the return addresses on the stack too, since what ran in between is unknown.
+// Returns false when it has to restart at the next sync.
+
+bool TraceProfiler::skipUnreportedJump()
+{
+	if ((nm.tcode != TraceDqrProfiler::TCODE_INDIRECT_BRANCH) && (nm.tcode != TraceDqrProfiler::TCODE_INDIRECT_BRANCH_WS) &&
+	    (nm.tcode != TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY) && (nm.tcode != TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY_WS)) {
+		return false;
+	}
+
+	counts->resetCounts(currentCore);
+	counts->resetStack(currentCore);
+
+	return true;
+}
+
+// For when a message's counts run out at addr, the address after the last instruction. An
+// IndirectBranch(Hist) with B-TYPE 0 reports a jump through a register, so its I-CNT must end on
+// that jump. Ending on anything else means the walk did not follow the program, so the return
+// addresses on the stack may not apply after the message's target and are dropped. The sync
+// versions are also sent on straight-line code, so they are not checked.
+
+void TraceProfiler::dropStackIfNotEndingOnJump(TraceDqrProfiler::ADDRESS addr, int crFlag)
+{
+	bool jumpReported = ((nm.tcode == TraceDqrProfiler::TCODE_INDIRECT_BRANCH) && (nm.indirectBranch.b_type == TraceDqrProfiler::BTYPE_INDIRECT)) ||
+	                    ((nm.tcode == TraceDqrProfiler::TCODE_INDIRECTBRANCHHISTORY) && (nm.indirectHistory.b_type == TraceDqrProfiler::BTYPE_INDIRECT));
+	bool endsOnJump = (addr == (TraceDqrProfiler::ADDRESS)-1) || ((crFlag & (TraceDqrProfiler::isReturn | TraceDqrProfiler::isSwap)) != 0);
+
+	if (jumpReported && !endsOnJump) {
+		counts->resetStack(currentCore);
 	}
 }
 
@@ -5898,9 +5939,10 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 					state[currentCore] = TRACE_STATE_RETIREMESSAGE;
 					break; // this break exits trace_state_getnextinstruction!
 				}
-				else if (counts->getCurrentCountType(currentCore) != TraceDqrProfiler::COUNTTYPE_none) {
+				else if ((counts->getCurrentCountType(currentCore) != TraceDqrProfiler::COUNTTYPE_none) && !skipUnreportedJump()) {
 					// error
 					// must have a JR/JALR or exception/exception return to get here, and the CR stack is empty
+					// (a message that reports a jump carries on from its target instead, see skipUnreportedJump())
 
 					//printf("Error: getCurrentCountType(core:%d) still has counts; have countType: %d\n", currentCore, counts->getCurrentCountType(currentCore));
 					//char d[64];
@@ -6026,6 +6068,8 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 			// if the instruction processed above in an indirect branch, counts should be zero and
 			// retiring this trace message should set the next address (message should be an indirect
 			// brnach type message)
+
+			dropStackIfNotEndingOnJump(addr, crFlag);
 
 			state[currentCore] = TRACE_STATE_RETIREMESSAGE;
 			break;
@@ -7393,9 +7437,10 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 					state[currentCore] = TRACE_STATE_RETIREMESSAGE;
 					break; // this break exits trace_state_getnextinstruction!
 				}
-				else if (counts->getCurrentCountType(currentCore) != TraceDqrProfiler::COUNTTYPE_none) {
+				else if ((counts->getCurrentCountType(currentCore) != TraceDqrProfiler::COUNTTYPE_none) && !skipUnreportedJump()) {
 					// error
 					// must have a JR/JALR or exception/exception return to get here, and the CR stack is empty
+					// (a message that reports a jump carries on from its target instead, see skipUnreportedJump())
 
 					printf("Error: getCurrentCountType(core:%d) still has counts; have countType: %d\n", currentCore, counts->getCurrentCountType(currentCore));
 					char d[64];
@@ -7527,6 +7572,8 @@ TraceDqrProfiler::DQErr TraceProfiler::NextInstruction(ProfilerInstruction** ins
 			// if the instruction processed above in an indirect branch, counts should be zero and
 			// retiring this trace message should set the next address (message should be an indirect
 			// brnach type message)
+
+			dropStackIfNotEndingOnJump(addr, crFlag);
 
 			state[currentCore] = TRACE_STATE_RETIREMESSAGE;
 			break;
@@ -7895,7 +7942,7 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 						state[currentCore] = TRACE_STATE_RETIREMESSAGE;
 						break;
 					}
-					else if (counts->getCurrentCountType(currentCore) != TraceDqrProfiler::COUNTTYPE_none)
+					else if ((counts->getCurrentCountType(currentCore) != TraceDqrProfiler::COUNTTYPE_none) && !skipUnreportedJump())
 					{
 						state[currentCore] = TRACE_STATE_GETFIRSTSYNCMSG;
 						status = TraceDqrProfiler::DQERR_OK;
@@ -7909,6 +7956,7 @@ TraceDqrProfiler::DQErr TraceProfiler::GenerateHistogram()
 				if (counts->getCurrentCountType(currentCore) == TraceDqrProfiler::COUNTTYPE_none)
 				{
 					// still have valid counts. Keep running nextInstruction!
+					dropStackIfNotEndingOnJump(addr, crFlag);
 					break;
 				}
 

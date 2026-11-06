@@ -943,6 +943,8 @@ private:
 	TraceDqrProfiler::DQErr processTraceMessage(ProfilerNexusMessage& nm, TraceDqrProfiler::ADDRESS& pc, TraceDqrProfiler::ADDRESS& faddr, TraceDqrProfiler::TIMESTAMP& ts, bool& consumed);
 	bool endRunawayWalk();
 	void dropLeftoverCounts();
+	bool skipUnreportedJump();
+	void dropStackIfNotEndingOnJump(TraceDqrProfiler::ADDRESS addr, int crFlag);
 public:
     // Function to add data to the message queue
     TraceDqrProfiler::DQErr PushTraceData(uint8_t *p_buff, const uint64_t size);
